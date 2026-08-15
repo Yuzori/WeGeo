@@ -1,0 +1,122 @@
+/** Types partagés entre le serveur (scraping) et l'interface React. */
+
+/** Étape du pipeline commercial d'un prospect. */
+export type LeadStatus =
+  /** Trouvé lors d'une recherche, pas encore trié. */
+  | 'nouveau'
+  /** Mis de côté pour être appelé. */
+  | 'favori'
+  /** Client signé. */
+  | 'termine'
+  /** Contacté mais non signé — exclu des recherches suivantes. */
+  | 'perdu';
+
+export const LEAD_STATUSES: LeadStatus[] = ['nouveau', 'favori', 'termine', 'perdu'];
+
+/**
+ * Nature du lien web de l'entreprise.
+ * `social` (page Facebook/Instagram uniquement) est considéré comme une cible
+ * de prospection : l'entreprise n'a pas de vrai site.
+ */
+export type WebsiteKind = 'aucun' | 'social' | 'site';
+
+/** Une entreprise trouvée sur Google Maps. */
+export interface Lead {
+  id: number;
+  /** Identifiant Google Maps (CID ou empreinte nom+adresse) — sert de clé de déduplication. */
+  placeKey: string;
+  name: string;
+  category: string | null;
+  address: string | null;
+  phone: string | null;
+  /** URL trouvée sur la fiche, `null` si aucune. */
+  website: string | null;
+  websiteKind: WebsiteKind;
+  rating: number | null;
+  reviewCount: number | null;
+  /** Lien cliquable vers la fiche Google Maps. */
+  mapsUrl: string;
+  lat: number | null;
+  lng: number | null;
+  city: string;
+  /** Le métier recherché qui a fait remonter cette entreprise. */
+  domain: string;
+  status: LeadStatus;
+  /** Notes libres saisies pendant l'appel. */
+  notes: string | null;
+  /** true si l'entreprise a déjà été vue lors d'une recherche précédente. */
+  createdAt: string;
+  updatedAt: string;
+  /** Nombre de fois où l'entreprise est remontée dans une recherche. */
+  seenCount: number;
+}
+
+export interface SearchRecord {
+  id: number;
+  city: string;
+  domains: string[];
+  /** Options utilisées, conservées pour pouvoir relancer la recherche à l'identique. */
+  options: SearchOptions;
+  status: 'en_cours' | 'termine' | 'annule' | 'erreur';
+  /** Nombre total de fiches inspectées. */
+  scanned: number;
+  /** Nombre d'entreprises sans site web retenues. */
+  found: number;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+}
+
+export interface SearchOptions {
+  /** Ne garder que les entreprises sans vrai site web. */
+  onlyWithoutWebsite: boolean;
+  /** Compter une page Facebook/Instagram comme « pas de site » (donc à prospecter). */
+  socialCountsAsNoWebsite: boolean;
+  /** Ouvrir chaque fiche pour confirmer l'absence de site et récupérer le téléphone exact. */
+  deepCheck: boolean;
+  /** Exclure les entreprises déjà traitées (terminé / perdu). */
+  excludeHandled: boolean;
+  /** Ne garder que les fiches avec un numéro de téléphone. */
+  requirePhone: boolean;
+  /** Nombre maximum de fiches inspectées par métier (0 = illimité). */
+  maxPerDomain: number;
+  /** Quadrillage géographique : découpe la ville en zones pour dépasser la limite de ~120 résultats. */
+  gridMode: boolean;
+  /** Nombre de zones par côté du quadrillage (2 = 4 zones, 3 = 9 zones...). */
+  gridSize: number;
+}
+
+export const DEFAULT_OPTIONS: SearchOptions = {
+  onlyWithoutWebsite: true,
+  socialCountsAsNoWebsite: true,
+  deepCheck: true,
+  excludeHandled: true,
+  requirePhone: false,
+  maxPerDomain: 0,
+  gridMode: false,
+  gridSize: 2,
+};
+
+export interface SearchRequest {
+  city: string;
+  domains: string[];
+  options: SearchOptions;
+}
+
+/** Messages poussés en direct (SSE) pendant une recherche. */
+export type ScrapeEvent =
+  | { type: 'start'; searchId: number; totalTasks: number }
+  | { type: 'progress'; message: string; scanned: number; found: number; taskIndex: number; totalTasks: number }
+  | { type: 'lead'; lead: Lead }
+  | { type: 'done'; search: SearchRecord }
+  | { type: 'error'; message: string };
+
+export interface Stats {
+  nouveau: number;
+  favori: number;
+  termine: number;
+  perdu: number;
+  total: number;
+  searches: number;
+}

@@ -1,0 +1,46 @@
+{
+  "name": "wegeo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "WeGeo — Prospection d'entreprises sans site web via Google Maps",
+  "scripts": {
+    "dev": "concurrently -n \"API,WEB\" -c \"green,cyan\" \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx watch --clear-screen=false server/index.ts",
+    "dev:web": "vite",
+    "build": "tsc -b && vite build",
+    "start": "cross-env NODE_ENV=production NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx server/index.ts",
+    "preview": "vite preview",
+    "setup": "playwright install chromium",
+    "probe": "tsx server/scripts/probe.ts",
+    "probe:place": "tsx server/scripts/probe-place.ts",
+    "probe:parallel": "tsx server/scripts/probe-parallel.ts",
+    "shots": "tsx server/scripts/shots.ts",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false"
+  },
+  "dependencies": {
+    "compression": "^1.8.1",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "lucide-react": "^0.549.0",
+    "playwright": "^1.56.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.16",
+    "@types/compression": "^1.8.1",
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "tailwindcss": "^4.1.16",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
