@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WeGeo Premium</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+  <script type="module" crossorigin src="./assets/index-DBUBegfL.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-nrRMVlFr.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Navigation -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <i data-lucide="globe-2" class="logo-icon"></i>
+                <h1>We<span class="highlight" style="color:var(--primary)">Geo</span></h1>
+            </div>
+
+            <nav class="main-nav">
+                <button class="nav-item active" id="nav-search" onclick="switchView('search-view')">
+                    <i data-lucide="search"></i>
+                    <span>Recherche</span>
+                </button>
+                <button class="nav-item" id="nav-favorites" onclick="switchView('favorites-view')">
+                    <i data-lucide="bookmark"></i>
+                    <span>Favoris</span>
+                </button>
+                <button class="nav-item" id="nav-done" onclick="switchView('done-view')">
+                    <i data-lucide="check-circle"></i>
+                    <span>Fait</span>
+                </button>
+                <button class="nav-item" id="nav-history" onclick="switchView('history-view')">
+                    <i data-lucide="history"></i>
+                    <span>Historique</span>
+                </button>
+                <div class="nav-divider"></div>
+                <button class="nav-item" id="nav-prospecting"
+                    onclick="window.renderProspectingView(); switchView('prospecting-view')">
+                    <i data-lucide="graduation-cap"></i>
+                    <span>Apprendre</span>
+                </button>
+            </nav>
+
+            <div class="user-profile">
+                <div class="avatar">
+                    <i data-lucide="user"></i>
+                </div>
+                <div class="user-info">
+                    <span class="name">Admin User</span>
+                    <span class="role">Pro Plan</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-bar">
+                <button id="mobile-menu-btn" class="icon-btn" style="display:none; margin-right:1rem;">
+                    <i data-lucide="menu"></i>
+                </button>
+                <h2 id="page-title" style="font-weight:600;">Prospection Locale</h2>
+                <div class="header-actions">
+                    <button class="icon-btn" title="Paramètres">
+                        <i data-lucide="settings"></i>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Search Section -->
+            <section id="search-view" class="view active">
+                <div class="search-container glass-panel">
+                    <div class="input-group">
+                        <i data-lucide="briefcase" class="input-icon"></i>
+                        <select id="input-activity">
+                            <option value="" disabled selected>Choisir une niche...</option>
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <i data-lucide="map-pin" class="input-icon"></i>
+                        <input type="text" id="input-location" list="cities-list"
+                            placeholder="Localisation (ex: Lyon, Paris...)" />
+                        <datalist id="cities-list"></datalist>
+                    </div>
+                    <button id="btn-search" class="primary-btn">
+                        <i data-lucide="search"></i>
+                        <span>Rechercher</span>
+                    </button>
+                </div>
+
+                <div class="filters-bar">
+                    <!-- Stats will be injected here -->
+                </div>
+
+                <div id="results-container" class="results-grid">
+                    <!-- Results will be injected here via JS -->
+                    <div class="empty-state">
+                        <i data-lucide="search-code" class="empty-icon"
+                            style="color:var(--primary); width:80px; height:80px; margin-bottom:1.5rem;"></i>
+                        <h3 style="margin-bottom:0.5rem; font-size:1.5rem;">Trouvez vos prochains clients</h3>
+                        <p style="max-width:400px; margin:0 auto;">Sélectionnez une niche ci-dessus pour identifier les
+                            entreprises locales à fort potentiel.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Favorites View -->
+            <section id="favorites-view" class="view hidden">
+                <!-- Favorites content -->
+            </section>
+
+            <!-- Done View -->
+            <section id="done-view" class="view hidden">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                    <h2>Prospects Traités</h2>
+                    <button class="action-btn" style="color:var(--danger); border-color:var(--danger);"
+                        onclick="window.confirmDeleteDone()">
+                        <i data-lucide="trash-2"></i> Tout effacer
+                    </button>
+                </div>
+                <div id="done-grid" class="results-grid"></div>
+            </section>
+
+            <!-- Training View -->
+            <section id="prospecting-view" class="view hidden">
+                <!-- Injected via JS -->
+            </section>
+
+            <!-- History View -->
+            <section id="history-view" class="view hidden">
+                <!-- Favorites content -->
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Pitch Generator Modal -->
+    <div id="modal-pitch" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3>Générateur de Script IA</h3>
+                <button class="close-modal" data-target="modal-pitch"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="pitch-loader" class="hidden" style="text-align:center; padding:2rem;">
+                    <div class="spinner"></div>
+                    <p>Analyse du profil et rédaction du script...</p>
+                </div>
+                <div id="pitch-output" class="typewriter-text hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirmation Modal -->
+    <div id="modal-confirm" class="modal hidden">
+        <div class="modal-content glass-panel" style="max-width:400px;">
+            <div class="modal-header">
+                <h3>Confirmation</h3>
+                <button class="close-modal" data-target="modal-confirm"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="text-align:center; padding: 2rem 1.5rem;">
+                <i data-lucide="alert-triangle"
+                    style="width:48px; height:48px; color:var(--warning); margin-bottom:1rem;"></i>
+                <p id="confirm-message" style="margin-bottom:1.5rem; font-size:1.1rem;">Êtes-vous sûr ?</p>
+                <div style="display:flex; justify-content:center; gap:1rem;">
+                    <button class="action-btn" id="btn-cancel-confirm">Annuler</button>
+                    <button class="primary-btn" id="btn-yes-confirm" style="background:var(--danger); border:none;">Tout
+                        supprimer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-container"></div>
+
+    <!-- Particles for Sakura/Themes -->
+    <canvas id="particles-canvas"></canvas>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal hidden">
+        <div class="modal-content glass-panel" style="max-width:600px;">
+            <div class="modal-header">
+                <h3><i data-lucide="palette"
+                        style="width:20px; vertical-align:middle; margin-right:8px;"></i>Personnalisation</h3>
+                <button class="close-modal" data-target="modal-settings"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+
+                <h4
+                    style="color:var(--primary); margin-bottom:1rem; font-size:0.9rem; text-transform:uppercase; letter-spacing:1px;">
+                    Thème Visuel</h4>
+                <div class="theme-grid"
+                    style="display:grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap:1rem; margin-bottom:2rem;">
+                    <div class="theme-option" onclick="setTheme('default')" style="text-align:center; cursor:pointer;">
+                        <div
+                            style="height:50px; background:#030407; border:2px solid #8b5cf6; border-radius:8px; margin-bottom:0.5rem;">
+                        </div>
+                        <span style="font-size:0.8rem;">WeGeo</span>
+                    </div>
+                    <div class="theme-option" onclick="setTheme('sakura')" style="text-align:center; cursor:pointer;">
+                        <div
+                            style="height:50px; background:#1a0b12; border:2px solid #ec4899; border-radius:8px; margin-bottom:0.5rem;">
+                        </div>
+                        <span style="font-size:0.8rem;">Sakura 🌸</span>
+                    </div>
+                    <div class="theme-option" onclick="setTheme('ocean')" style="text-align:center; cursor:pointer;">
+                        <div
+                            style="height:50px; background:#021019; border:2px solid #06b6d4; border-radius:8px; margin-bottom:0.5rem;">
+                        </div>
+                        <span style="font-size:0.8rem;">Ocean 🌊</span>
+                    </div>
+                    <div class="theme-option" onclick="setTheme('gold')" style="text-align:center; cursor:pointer;">
+                        <div
+                            style="height:50px; background:#0f0b05; border:2px solid #eab308; border-radius:8px; margin-bottom:0.5rem;">
+                        </div>
+                        <span style="font-size:0.8rem;">Gold 🏆</span>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <h4
+                    style="color:var(--primary); margin-bottom:1rem; font-size:0.9rem; text-transform:uppercase; letter-spacing:1px;">
+                    Paramètres Pro</h4>
+
+                <div class="setting-row">
+                    <div>
+                        <span class="setting-label">Sons & Effets</span>
+                        <p class="setting-desc">Feedback sonore</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="setting-sound" checked onchange="toggleSetting('sound')">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <span class="setting-label">Format d'Export</span>
+                        <p class="setting-desc">Format des données copiées</p>
+                    </div>
+                    <select id="setting-export-fmt"
+                        style="padding:0.5rem; background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.1); border-radius:4px;"
+                        onchange="updateExportFormat()">
+                        <option value="tsv">Excel / Sheets</option>
+                        <option value="csv">CSV Classique</option>
+                        <option value="json">JSON Pur</option>
+                    </select>
+                </div>
+
+                <div class="divider"></div>
+
+                <button class="action-btn"
+                    style="width:100%; border-color:var(--danger); color:var(--danger); justify-content:center;"
+                    onclick="window.confirmResetApp()">
+                    <i data-lucide="trash"></i> Réinitialiser l'application
+                </button>
+
+                <button class="primary-btn" style="width:100%; height: 43px; justify-content:center; margin-top:1.5rem;"
+                    onclick="document.getElementById('modal-settings').classList.add('hidden')">
+                    Fermer
+                </button>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>
