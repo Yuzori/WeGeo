@@ -114,8 +114,32 @@ Ajoutez `RAW=1` devant la première commande pour voir le texte brut de chaque c
 | --- | --- | --- |
 | `PORT` | Port du serveur | `4319` |
 | `WEGEO_DB` | Emplacement de la base | `data/wegeo.db` |
+| `WEGEO_BROWSER_DIR` | Profil du navigateur | `data/browser` |
+| `WEGEO_PASSWORD` | Mot de passe d'accès. **À définir dès que le site est exposé à Internet** | aucun (accès libre) |
 | `WEGEO_HEADFUL` | `1` pour afficher le navigateur | désactivé |
 | `WEGEO_DEBUG` | `1` pour détailler les erreurs de scraping | désactivé |
+| `WEGEO_NO_SANDBOX` | `1` si Chromium tourne en root (conteneur) | désactivé |
+| `WEGEO_TASK_CONCURRENCY` | Métiers explorés en parallèle | `3` |
+| `WEGEO_DETAIL_CONCURRENCY` | Fiches vérifiées en parallèle | `3` (ou `6` sur un seul métier) |
+
+## Accéder au site à distance
+
+WeGeo n'est pas un site statique : il lui faut un serveur, car il pilote un vrai
+Chromium et conserve vos fiches dans une base SQLite. Deux façons d'y accéder
+en déplacement.
+
+**Depuis un hébergeur.** Le fichier `render.yaml` décrit le service prêt à
+l'emploi sur Render (Docker, disque persistant pour la base). Deux contraintes :
+Chromium ne tient pas dans 512 Mo, il faut donc une instance de 2 Go ; et les
+recherches partent d'une IP de centre de données, que Google bloque bien plus
+volontiers qu'une connexion résidentielle. Définissez `WEGEO_PASSWORD`, sinon
+votre prospection est publique.
+
+**Depuis votre machine.** Laissez WeGeo tourner chez vous et ouvrez-y un accès
+par un tunnel (`cloudflared tunnel --url http://localhost:4319`). C'est gratuit,
+le scraping reste fiable puisqu'il part de votre connexion, et les données ne
+quittent pas votre disque. En revanche l'ordinateur doit rester allumé. Là aussi,
+définissez `WEGEO_PASSWORD` avant d'ouvrir le tunnel.
 
 ## Architecture
 

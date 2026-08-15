@@ -1,0 +1,10 @@
+node_modules
+dist
+data
+tmp
+.tmp
+.git
+.gitignore
+*.log
+README.md
+wegeo first v

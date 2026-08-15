@@ -20,6 +20,19 @@ const DEBUG = process.env.WEGEO_DEBUG === '1';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36';
 
+/**
+ * En conteneur, `/dev/shm` est minuscule : sans ce drapeau Chromium plante dès
+ * qu'on ouvre plusieurs onglets. Le bac à sable, lui, ne peut être désactivé
+ * que volontairement (l'hébergeur exécute le processus en root).
+ */
+const CHROME_ARGS = [
+  '--lang=fr-FR',
+  '--disable-blink-features=AutomationControlled',
+  '--no-first-run',
+  '--disable-dev-shm-usage',
+  ...(process.env.WEGEO_NO_SANDBOX === '1' ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
+];
+
 /** Tuiles, imagerie et télémétrie : aucun intérêt pour lire du texte. */
 const USELESS = /\/maps\/vt|\/maps\/photo|gen_204|log204|\/maps\/preview\/log|googleusercontent|\/gen204/i;
 
@@ -39,7 +52,7 @@ async function getContext(): Promise<BrowserContext> {
         timezoneId: 'Europe/Paris',
         viewport: { width: 1440, height: 900 },
         userAgent: UA,
-        args: ['--lang=fr-FR', '--disable-blink-features=AutomationControlled', '--no-first-run'],
+        args: CHROME_ARGS,
       })
       .then(async (ctx) => {
         ctx.setDefaultTimeout(30_000);

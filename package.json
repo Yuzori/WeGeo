@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "WeGeo — Prospection d'entreprises sans site web via Google Maps",
+  "engines": {
+    "node": ">=22.5"
+  },
   "scripts": {
     "dev": "concurrently -n \"API,WEB\" -c \"green,cyan\" \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx watch --clear-screen=false server/index.ts",

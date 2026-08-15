@@ -1,0 +1,37 @@
+# Déploiement de WeGeo sur Render.
+#
+# À l'inverse de l'ancienne version, celle-ci n'est pas un site statique : elle
+# a besoin d'un serveur qui pilote un vrai Chromium et conserve une base
+# SQLite. D'où un service « web » en Docker, et un disque persistant sans
+# lequel vos prospects seraient effacés à chaque déploiement.
+services:
+  - type: web
+    name: wegeo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: frankfurt
+    branch: main
+    # Chromium ne tient pas dans 512 Mo : une instance de 2 Go est nécessaire.
+    plan: standard
+    healthCheckPath: /healthz
+    disk:
+      name: wegeo-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # Base et profil du navigateur sur le disque persistant.
+      - key: WEGEO_DB
+        value: /data/wegeo.db
+      - key: WEGEO_BROWSER_DIR
+        value: /data/browser
+      # Le conteneur tourne en root : Chromium exige alors ce réglage.
+      - key: WEGEO_NO_SANDBOX
+        value: '1'
+      # Parallélisme réduit par rapport à un poste de travail, pour la mémoire.
+      - key: WEGEO_TASK_CONCURRENCY
+        value: '2'
+      - key: WEGEO_DETAIL_CONCURRENCY
+        value: '2'
+      # À saisir dans le tableau de bord : mot de passe d'accès au site.
+      - key: WEGEO_PASSWORD
+        sync: false

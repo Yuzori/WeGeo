@@ -1,5 +1,6 @@
-import express, { type Request, type Response } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import compression from 'compression';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_OPTIONS, LEAD_STATUSES, type LeadStatus, type SearchOptions } from '../shared/types.ts';
@@ -10,9 +11,48 @@ import { closeBrowser, warmUp } from './scraper/maps.ts';
 import { geocodeCity } from './scraper/geo.ts';
 
 const PORT = Number(process.env.PORT ?? 4319);
-const app = express();
+const PASSWORD = process.env.WEGEO_PASSWORD;
 
-app.use(compression());
+/**
+ * Mot de passe unique, comparé en temps constant. Utile dès que l'application
+ * est exposée à Internet : sans lui, n'importe qui lirait votre prospection.
+ * Laissé vide en local, l'accès reste direct.
+ */
+function requirePassword(expected: string) {
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  const reference = digest(expected);
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const [scheme, encoded] = String(req.headers.authorization ?? '').split(' ');
+
+    if (scheme === 'Basic' && encoded) {
+      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+      if (timingSafeEqual(digest(decoded.slice(decoded.indexOf(':') + 1)), reference)) return next();
+    }
+
+    res.set('WWW-Authenticate', 'Basic realm="WeGeo", charset="UTF-8"');
+    res.status(401).send('WeGeo — accès protégé.');
+  };
+}
+
+const app = express();
+app.disable('x-powered-by');
+
+app.use(
+  compression({
+    // Le flux d'évènements doit partir sans mise en tampon, sinon la recherche
+    // en direct n'affiche plus rien derrière un proxy.
+    filter: (req, res) =>
+      !String(res.getHeader('Content-Type') ?? '').includes('text/event-stream') &&
+      compression.filter(req, res),
+  }),
+);
+
+// Sonde d'état de l'hébergeur : doit rester accessible sans mot de passe.
+app.get('/healthz', (_req: Request, res: Response) => res.json({ ok: true }));
+
+if (PASSWORD) app.use(requirePassword(PASSWORD));
+
 app.use(express.json({ limit: '2mb' }));
 
 db.markStaleSearchesCancelled();

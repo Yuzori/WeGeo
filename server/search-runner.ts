@@ -134,8 +134,9 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
 
   // Plusieurs métiers sont explorés de front. On garde des chiffres modestes :
   // chaque tâche ouvre elle-même plusieurs onglets pour vérifier les fiches.
-  const taskConcurrency = Math.min(tasks.length, 3);
-  const detailConcurrency = taskConcurrency > 1 ? 3 : 6;
+  // Sur une machine peu dotée en mémoire, les deux réglages sont abaissables.
+  const taskConcurrency = Math.min(tasks.length, envLimit('WEGEO_TASK_CONCURRENCY', 3));
+  const detailConcurrency = envLimit('WEGEO_DETAIL_CONCURRENCY', taskConcurrency > 1 ? 3 : 6);
 
   const emit = (message: string) =>
     run.push({ type: 'progress', message, scanned, found, taskIndex: done, totalTasks });
@@ -233,6 +234,12 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
   );
   run.push({ type: 'done', search: search! });
   scheduleCleanup(run.id);
+}
+
+/** Lit une limite de parallélisme dans l'environnement, entre 1 et 6. */
+function envLimit(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 1 ? Math.min(6, Math.floor(value)) : fallback;
 }
 
 interface Candidate extends db.LeadInput {
