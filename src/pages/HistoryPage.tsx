@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Clock, History, MapPin, RotateCcw, Table2, Trash2 } from 'lucide-react';
-import type { Lead, SearchRecord } from '../../shared/types';
+import { useNavigate } from 'react-router-dom';
+import { Clock, MapPin, PlayCircle, RotateCcw, Table2, Trash2 } from 'lucide-react';
+import { isResumable, type Lead, type SearchRecord } from '../../shared/types';
 import { api } from '../api';
+import { SESSION_KEY } from '../hooks';
 import { LeadCard } from '../components/LeadCard';
 import { SheetModal } from '../components/SheetModal';
-import { Badge, Button, EmptyState, IconButton, Spinner, useToast } from '../components/ui';
+import { Button, EmptyState, IconButton, Spinner, Tag, useToast } from '../components/ui';
 import { useLeadCollection, useMeta } from '../hooks';
 
-const STATUS_STYLE: Record<SearchRecord['status'], { label: string; tone: 'brand' | 'outline' | 'solid' | 'neutral' }> = {
-  termine: { label: 'Terminée', tone: 'brand' },
-  en_cours: { label: 'En cours', tone: 'solid' },
-  annule: { label: 'Arrêtée', tone: 'neutral' },
-  erreur: { label: 'Erreur', tone: 'outline' },
+const STATUS_STYLE: Record<
+  SearchRecord['status'],
+  { label: string; tone: 'lime' | 'outline' | 'ink' | 'plain' | 'ember' }
+> = {
+  termine: { label: 'terminée', tone: 'lime' },
+  en_cours: { label: 'en cours', tone: 'ink' },
+  annule: { label: 'arrêtée', tone: 'plain' },
+  erreur: { label: 'erreur', tone: 'ember' },
 };
 
 function formatDate(iso: string): string {
@@ -27,11 +32,12 @@ function formatDuration(ms: number | null): string {
   if (!ms) return '—';
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} s`;
-  return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
+  return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')}`;
 }
 
 export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => void }) {
   const notify = useToast();
+  const navigate = useNavigate();
   const { refreshMeta } = useMeta();
   const [searches, setSearches] = useState<SearchRecord[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -46,17 +52,31 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
 
   useEffect(load, [load]);
 
+  /**
+   * Relance un relevé arrêté et bascule sur l'écran de recherche : celui-ci
+   * retrouve la session par l'identifiant déposé ici.
+   */
+  const resume = async (search: SearchRecord) => {
+    try {
+      await api.resumeSearch(search.id);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(search.id));
+      navigate('/app');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'La reprise a échoué', 'error');
+    }
+  };
+
   const remove = async (search: SearchRecord) => {
     setSearches((list) => list?.filter((s) => s.id !== search.id) ?? null);
     await api.deleteSearch(search.id).catch(() => {});
     refreshMeta();
-    notify('Recherche retirée de l’historique');
+    notify('Relevé retiré de l’historique');
   };
 
   if (!searches) {
     return (
-      <div className="flex items-center justify-center gap-2 py-20 text-sm text-subtle">
-        <Spinner /> Chargement de l’historique…
+      <div className="flex items-center justify-center gap-2 py-20 text-sm text-faint">
+        <Spinner /> Chargement du journal…
       </div>
     );
   }
@@ -64,60 +84,60 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
   return (
     <div className="space-y-5">
       <header>
-        <p className="mb-1.5 text-xs font-semibold tracking-[0.08em] text-accent-text uppercase">Journal</p>
-        <h1 className="text-[1.75rem] leading-none font-semibold tracking-tight text-text">Historique</h1>
-        <p className="mt-2 text-sm text-muted">
-          Toutes vos recherches passées. Rejouez-les en un clic ou consultez leurs résultats.
+        <h1 className="text-[2rem] leading-none font-semibold tracking-tight">Historique</h1>
+        <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-muted">
+          Tous vos relevés passés. Rejouez-les en un clic ou consultez leurs fiches.
         </p>
       </header>
 
       {!searches.length ? (
         <EmptyState
-          icon={<History className="size-7" />}
-          title="Aucune recherche pour le moment"
-          description="Chaque recherche lancée depuis WeGeo est conservée ici avec ses résultats."
+          title="Aucun relevé pour le moment"
+          description="Chaque recherche lancée depuis Prospy est conservée ici avec ses résultats."
         />
       ) : (
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           {searches.map((search, index) => (
             <article
               key={search.id}
-              style={{ animationDelay: `${Math.min(index, 10) * 35}ms` }}
-              className="card animate-in overflow-hidden transition-shadow hover:shadow-[var(--shadow-lift)]"
+              style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
+              className="sheet deal-in overflow-hidden transition-all duration-200 hover:border-rule-strong hover:shadow-[var(--shadow-raised)]"
             >
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-text">
-                      <MapPin className="size-4 text-accent-text" />
+                    <span className="inline-flex items-center gap-1.5 font-semibold">
+                      <MapPin className="size-4 text-lime-deep" />
                       {search.city}
                     </span>
-                    <Badge tone={STATUS_STYLE[search.status].tone}>{STATUS_STYLE[search.status].label}</Badge>
+                    <Tag tone={STATUS_STYLE[search.status].tone}>{STATUS_STYLE[search.status].label}</Tag>
                     {search.options.gridMode && (
-                      <Badge tone="neutral">
+                      <Tag tone="outline">
                         quadrillage {search.options.gridSize}×{search.options.gridSize}
-                      </Badge>
+                      </Tag>
                     )}
                   </div>
-                  <p className="mt-1 truncate text-xs text-subtle">{search.domains.join(' · ')}</p>
+                  <p className="mt-1 truncate font-mono text-[10px] tracking-wide text-faint">
+                    {search.domains.join(' · ')}
+                  </p>
                 </div>
 
-                <dl className="flex gap-5 text-xs">
+                <dl className="flex gap-5">
                   <div>
-                    <dt className="text-subtle">Trouvées</dt>
-                    <dd className="tnum text-lg leading-tight font-semibold text-accent-text">{search.found}</dd>
+                    <dt className="legend">trouvées</dt>
+                    <dd className="tnum text-lg leading-tight font-semibold text-lime-deep">{search.found}</dd>
                   </div>
                   <div>
-                    <dt className="text-subtle">Inspectées</dt>
-                    <dd className="tnum text-lg leading-tight font-semibold text-text">{search.scanned}</dd>
+                    <dt className="legend">inspectées</dt>
+                    <dd className="tnum text-lg leading-tight font-semibold">{search.scanned}</dd>
                   </div>
                   <div className="hidden sm:block">
-                    <dt className="text-subtle">Durée</dt>
-                    <dd className="pt-1 text-muted">{formatDuration(search.durationMs)}</dd>
+                    <dt className="legend">durée</dt>
+                    <dd className="tnum pt-1 text-xs text-muted">{formatDuration(search.durationMs)}</dd>
                   </div>
                   <div className="hidden md:block">
-                    <dt className="text-subtle">Date</dt>
-                    <dd className="inline-flex items-center gap-1 pt-1 text-muted">
+                    <dt className="legend">date</dt>
+                    <dd className="inline-flex items-center gap-1 pt-1 text-xs text-muted">
                       <Clock className="size-3" />
                       {formatDate(search.createdAt)}
                     </dd>
@@ -130,22 +150,42 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
                     variant="ghost"
                     onClick={() => setOpenId(openId === search.id ? null : search.id)}
                   >
-                    {openId === search.id ? 'Masquer' : 'Résultats'}
+                    {openId === search.id ? 'Masquer' : 'Fiches'}
                   </Button>
-                  <IconButton label="Voir le tableur" onClick={() => setSheetId(search.id)}>
+                  {isResumable(search) && (
+                    <IconButton
+                      label={`Reprendre : ${(search.totalTasks ?? 0) - search.doneTasks} métier(s) restant(s)`}
+                      tone="green"
+                      motion="pop"
+                      onClick={() => resume(search)}
+                    >
+                      <PlayCircle className="size-4" />
+                    </IconButton>
+                  )}
+                  <IconButton label="Voir le tableur" motion="fly" onClick={() => setSheetId(search.id)}>
                     <Table2 className="size-4" />
                   </IconButton>
-                  <IconButton label="Relancer cette recherche" tone="brand" onClick={() => onReplay(search)}>
+                  <IconButton
+                    label="Relancer ce relevé"
+                    tone="lime"
+                    motion="spin"
+                    onClick={() => onReplay(search)}
+                  >
                     <RotateCcw className="size-4" />
                   </IconButton>
-                  <IconButton label="Supprimer de l’historique" tone="armed" onClick={() => remove(search)}>
+                  <IconButton
+                    label="Supprimer de l’historique"
+                    tone="danger"
+                    motion="shake"
+                    onClick={() => remove(search)}
+                  >
                     <Trash2 className="size-4" />
                   </IconButton>
                 </div>
               </div>
 
               {search.error && (
-                <p className="border-t border-line bg-surface-3 px-4 py-2 text-xs text-muted">{search.error}</p>
+                <p className="border-t border-rule bg-card-2 px-4 py-2 text-xs text-muted">{search.error}</p>
               )}
 
               {openId === search.id && <SearchResults searchId={search.id} />}
@@ -159,21 +199,21 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
           open
           onClose={() => setSheetId(null)}
           query={{ searchId: sheetId }}
-          title={`recherche n°${sheetId}`}
+          title={`relevé n°${sheetId}`}
         />
       )}
     </div>
   );
 }
 
-/** Fiches issues d'une recherche précise, dépliées sous la ligne d'historique. */
+/** Fiches issues d'un relevé précis, dépliées sous la ligne d'historique. */
 function SearchResults({ searchId }: { searchId: number }) {
   const { refreshMeta } = useMeta();
   const collection = useLeadCollection({ searchId }, refreshMeta);
 
   if (collection.loading && !collection.leads.length) {
     return (
-      <div className="flex items-center gap-2 border-t border-line px-4 py-6 text-sm text-subtle">
+      <div className="flex items-center gap-2 border-t border-rule px-4 py-6 text-sm text-faint">
         <Spinner /> Chargement des fiches…
       </div>
     );
@@ -181,14 +221,12 @@ function SearchResults({ searchId }: { searchId: number }) {
 
   if (!collection.leads.length) {
     return (
-      <p className="border-t border-line px-4 py-6 text-sm text-subtle">
-        Aucune fiche conservée pour cette recherche.
-      </p>
+      <p className="border-t border-rule px-4 py-6 text-sm text-faint">Aucune fiche conservée pour ce relevé.</p>
     );
   }
 
   return (
-    <div className="space-y-2 border-t border-line bg-surface-2 p-3">
+    <div className="space-y-2 border-t border-rule bg-card-2 p-3">
       {collection.leads.map((lead: Lead, index: number) => (
         <LeadCard
           key={lead.id}

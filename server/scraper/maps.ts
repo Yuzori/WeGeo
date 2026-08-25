@@ -155,7 +155,7 @@ export async function scrapeList(
       const result = await attemptList(page, query, tile, options);
       if (result.cards) return result.cards;
       lastReason = result.reason;
-      if (DEBUG) console.warn(`[wegeo] « ${query} » essai ${attempt} : ${result.reason}`);
+      if (DEBUG) console.warn(`[prospy] « ${query} » essai ${attempt} : ${result.reason}`);
     } catch (err) {
       lastReason = err instanceof Error ? err.message.split('\n')[0] : 'erreur inconnue';
     } finally {
@@ -416,7 +416,7 @@ async function readPlaceIn(page: Page, mapsUrl: string): Promise<PlaceDetails | 
 
     return await readPlaceDetails(page);
   } catch (err) {
-    if (DEBUG) console.error(`[wegeo] fiche illisible ${mapsUrl}:`, err instanceof Error ? err.message : err);
+    if (DEBUG) console.error(`[prospy] fiche illisible ${mapsUrl}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }

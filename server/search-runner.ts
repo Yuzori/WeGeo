@@ -5,7 +5,7 @@
  */
 
 import { EventEmitter } from 'node:events';
-import type { ScrapeEvent, SearchOptions, SearchRequest } from '../shared/types.ts';
+import type { ScrapeEvent, SearchOptions, SearchRecord, SearchRequest } from '../shared/types.ts';
 import * as db from './db.ts';
 import { buildGrid, geocodeCity, type Tile } from './scraper/geo.ts';
 import { fetchPlaceDetailsBatch, scrapeList, type RawCard } from './scraper/maps.ts';
@@ -69,26 +69,45 @@ function scheduleCleanup(id: number) {
 }
 
 /** Lance la recherche en tâche de fond et renvoie son identifiant. */
-export function startSearch(request: SearchRequest): number {
+export function startSearch(request: SearchRequest, userId: number): number {
   const city = request.city.trim();
   const domains = request.domains.map((d) => d.trim()).filter(Boolean);
   const options = request.options;
 
-  const record = db.createSearch(city, domains, options);
+  const record = db.createSearch(userId, city, domains, options);
+  launch(record);
+  return record.id;
+}
+
+/**
+ * Reprend une recherche arrêtée : les métiers déjà parcourus sont sautés, les
+ * compteurs repartent de leur dernière valeur.
+ */
+export function resumeSearch(id: number, userId: number): boolean {
+  const existing = db.getSearch(id, userId);
+  if (!existing || existing.status === 'en_cours') return false;
+  if (existing.totalTasks === null || existing.doneTasks >= existing.totalTasks) return false;
+
+  const record = db.reopenSearch(id);
+  if (!record || record.userId !== userId) return false;
+  launch(record);
+  return true;
+}
+
+function launch(record: SearchRecord): void {
   const run = new Run(record.id);
   runs.set(record.id, run);
 
-  void execute(run, city, domains, options).catch((err: unknown) => {
+  void execute(run, record).catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     db.finishSearch(run.id, 'erreur', message);
     run.push({ type: 'error', message });
     scheduleCleanup(run.id);
   });
-
-  return record.id;
 }
 
-async function execute(run: Run, city: string, domains: string[], options: SearchOptions): Promise<void> {
+async function execute(run: Run, record: SearchRecord): Promise<void> {
+  const { city, domains, options } = record;
   const isCancelled = () => run.cancelled;
 
   // 1. Zones à interroger.
@@ -118,19 +137,41 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
     }
   }
 
-  // Chaque couple métier × secteur est une tâche indépendante.
-  const tasks = domains.flatMap((domain) =>
-    tiles.map((tile) => ({ domain, tile, where: tile ? `${city} — ${tile.label}` : city })),
+  // Chaque couple métier × secteur est une tâche indépendante, identifiée par
+  // une clé stable : c'est elle qui permet de reprendre une recherche arrêtée.
+  const allTasks = domains.flatMap((domain) =>
+    tiles.map((tile) => ({
+      domain,
+      tile,
+      where: tile ? `${city} — ${tile.label}` : city,
+      key: `${domain}@@${tile?.label ?? '-'}`,
+    })),
   );
 
-  const totalTasks = tasks.length;
-  run.push({ type: 'start', searchId: run.id, totalTasks });
+  const totalTasks = allTasks.length;
+  db.setSearchTotalTasks(run.id, totalTasks);
 
-  const handled = options.excludeHandled ? db.handledPlaceKeys() : new Set<string>();
+  const alreadyDone = new Set(db.searchDoneTasks(run.id));
+  const tasks = allTasks.filter((task) => !alreadyDone.has(task.key));
+
+  run.push({ type: 'start', searchId: run.id, totalTasks });
+  if (alreadyDone.size) {
+    run.push({
+      type: 'progress',
+      message: `Reprise : ${alreadyDone.size} métier(s) déjà parcouru(s), ${tasks.length} restant(s)`,
+      scanned: record.scanned,
+      found: record.found,
+      taskIndex: alreadyDone.size,
+      totalTasks,
+    });
+  }
+
+  const handled = options.excludeHandled ? db.handledPlaceKeys(record.userId) : new Set<string>();
   const seenKeys = new Set<string>();
-  let scanned = 0;
-  let found = 0;
-  let done = 0;
+  // Une reprise continue les compteurs de la recherche au lieu de repartir de zéro.
+  let scanned = record.scanned;
+  let found = record.found;
+  let done = alreadyDone.size;
 
   // Plusieurs métiers sont explorés de front. On garde des chiffres modestes :
   // chaque tâche ouvre elle-même plusieurs onglets pour vérifier les fiches.
@@ -144,9 +185,24 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
   let cursor = 0;
   const failures: string[] = [];
 
+  /** Enregistre une entreprise retenue et l'envoie aussitôt à l'écran. */
+  const publish = (candidate: Candidate): void => {
+    if (options.onlyWithoutWebsite && !isTarget(candidate, options)) return;
+    if (options.requirePhone && !candidate.phone) return;
+
+    const { lead, isNew } = db.upsertLead({ ...candidate, userId: record.userId });
+    db.linkSearchLead(run.id, lead.id);
+
+    // Une fiche déjà classée par l'utilisateur ne réapparaît pas.
+    if (!isNew && options.excludeHandled && (lead.status === 'termine' || lead.status === 'perdu')) return;
+
+    found++;
+    run.push({ type: 'lead', lead });
+  };
+
   const worker = async (): Promise<void> => {
     while (cursor < tasks.length && !isCancelled()) {
-      const { domain, tile, where } = tasks[cursor++];
+      const { domain, tile, where, key } = tasks[cursor++];
       emit(`« ${domain} » à ${where} : ouverture de Google Maps…`);
 
       let cards: RawCard[] = [];
@@ -183,7 +239,9 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
 
       db.updateSearchProgress(run.id, scanned, found);
 
-      // 3. Vérification approfondie des seules fiches retenues.
+      // 3. Vérification approfondie, fiche par fiche. Chaque entreprise retenue
+      //    est envoyée à l'écran dès que sa fiche est lue : la liste se remplit
+      //    au fil de l'eau au lieu d'apparaître d'un bloc à la fin du métier.
       if (options.deepCheck && candidates.length && !isCancelled()) {
         let checked = 0;
         emit(`« ${domain} » à ${where} : vérification de ${candidates.length} fiches…`);
@@ -195,38 +253,27 @@ async function execute(run: Run, city: string, domains: string[], options: Searc
             checked++;
             if (details) applyDetails(c, details);
             c.verified = details !== null;
-            if (checked % 5 === 0) {
-              emit(`« ${domain} » à ${where} : ${checked}/${candidates.length} fiches vérifiées`);
-            }
+            publish(c);
+            emit(`« ${domain} » à ${where} : ${checked}/${candidates.length} fiches vérifiées`);
           },
           { concurrency: detailConcurrency, isCancelled },
         );
-      }
-
-      // 4. Enregistrement.
-      for (const candidate of candidates) {
-        if (options.onlyWithoutWebsite && !isTarget(candidate, options)) continue;
-        if (options.requirePhone && !candidate.phone) continue;
-
-        const { lead, isNew } = db.upsertLead(candidate);
-        db.linkSearchLead(run.id, lead.id);
-
-        // Une fiche déjà classée par l'utilisateur ne réapparaît pas.
-        if (!isNew && options.excludeHandled && (lead.status === 'termine' || lead.status === 'perdu')) continue;
-
-        found++;
-        run.push({ type: 'lead', lead });
+      } else {
+        for (const candidate of candidates) publish(candidate);
       }
 
       done++;
       db.updateSearchProgress(run.id, scanned, found);
+      // La tâche n'est notée comme faite qu'ici : une interruption au milieu
+      // la laisse à reprendre, sans perdre les fiches déjà enregistrées.
+      if (!isCancelled()) db.recordSearchTask(run.id, key);
     }
   };
 
   await Promise.all(Array.from({ length: taskConcurrency }, worker));
 
   // Une recherche qui n'a rien pu lire doit le dire clairement.
-  const allFailed = failures.length === totalTasks;
+  const allFailed = tasks.length > 0 && failures.length === tasks.length;
   const search = db.finishSearch(
     run.id,
     run.cancelled ? 'annule' : allFailed ? 'erreur' : 'termine',
@@ -242,7 +289,7 @@ function envLimit(name: string, fallback: number): number {
   return Number.isFinite(value) && value >= 1 ? Math.min(6, Math.floor(value)) : fallback;
 }
 
-interface Candidate extends db.LeadInput {
+interface Candidate extends Omit<db.LeadInput, 'userId'> {
   verified?: boolean;
 }
 

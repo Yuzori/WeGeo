@@ -1,4 +1,6 @@
-# Déploiement de WeGeo sur Render.
+# Déploiement de Prospy sur Render.
+# Le nom de service `wegeo` et le disque `wegeo-data` sont conservés : les
+# renommer casserait l’instance déjà provisionnée.
 #
 # À l'inverse de l'ancienne version, celle-ci n'est pas un site statique : elle
 # a besoin d'un serveur qui pilote un vrai Chromium et conserve une base
@@ -32,6 +34,9 @@ services:
         value: '2'
       - key: WEGEO_DETAIL_CONCURRENCY
         value: '2'
-      # À saisir dans le tableau de bord : mot de passe d'accès au site.
-      - key: WEGEO_PASSWORD
-        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      # Renseigner aussi dans le dashboard (secrets, jamais dans git) :
+      # APP_URL, STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_WEBHOOK_SECRET,
+      # STRIPE_PRICE_STARTER, STRIPE_PRICE_PRO, STRIPE_PRICE_AGENCE
+      # GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, MAIL_FROM, RESEND_API_KEY

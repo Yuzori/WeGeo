@@ -3,7 +3,7 @@
  *
  *   npm run probe -- "boulangerie" "Annecy" [nombre]
  *
- * Affiche ce que WeGeo lit réellement sur Google Maps : utile si Google
+ * Affiche ce que Prospy lit réellement sur Google Maps : utile si Google
  * modifie sa page et que les résultats deviennent incomplets.
  */
 

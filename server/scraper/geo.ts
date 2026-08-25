@@ -3,7 +3,7 @@
  * Sert uniquement à connaître l'emprise d'une ville pour la découper en zones.
  */
 
-const USER_AGENT = 'WeGeo/1.0 (outil de prospection locale)';
+const USER_AGENT = 'Prospy/1.0 (outil de prospection locale)';
 
 export interface GeoCity {
   displayName: string;

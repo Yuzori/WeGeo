@@ -53,6 +53,7 @@ export interface Lead {
 
 export interface SearchRecord {
   id: number;
+  userId: number;
   city: string;
   domains: string[];
   /** Options utilisées, conservées pour pouvoir relancer la recherche à l'identique. */
@@ -66,6 +67,16 @@ export interface SearchRecord {
   createdAt: string;
   finishedAt: string | null;
   durationMs: number | null;
+  /** Nombre total de couples métier × secteur à parcourir. */
+  totalTasks: number | null;
+  /** Nombre de ces couples déjà terminés — le reste peut être reprise. */
+  doneTasks: number;
+}
+
+/** Une recherche arrêtée avant la fin peut être relancée là où elle en était. */
+export function isResumable(search: SearchRecord): boolean {
+  if (search.status === 'en_cours') return false;
+  return search.totalTasks !== null && search.doneTasks < search.totalTasks;
 }
 
 export interface SearchOptions {
@@ -119,4 +130,47 @@ export interface Stats {
   perdu: number;
   total: number;
   searches: number;
+}
+
+/** Offres d’abonnement. Les Price IDs Stripe restent côté serveur. */
+export type PlanId = 'starter' | 'pro' | 'agence';
+
+export type SubscriptionStatus =
+  | 'none'
+  | 'incomplete'
+  | 'trialing'
+  | 'active'
+  | 'past_due'
+  | 'canceled'
+  | 'unpaid'
+  | 'paused';
+
+/** Profil renvoyé au navigateur : jamais de hash ni d’identifiants Stripe. */
+export interface PublicUser {
+  id: number;
+  email: string;
+  plan: PlanId | null;
+  subscriptionStatus: SubscriptionStatus;
+  googleLinked: boolean;
+  canExportSheets: boolean;
+}
+
+export interface BillingPlan {
+  id: PlanId;
+  name: string;
+  tagline: string;
+  /** Libellé d’affichage uniquement ; le montant facturé est celui de Stripe. */
+  amountLabel: string;
+  interval: 'month';
+  features: string[];
+  highlighted?: boolean;
+  cta: string;
+  priceConfigured: boolean;
+}
+
+export interface BillingPublicConfig {
+  /** Clé publiable Stripe (`pk_…`), prévue pour le navigateur. */
+  publishableKey: string | null;
+  configured: boolean;
+  plans: BillingPlan[];
 }

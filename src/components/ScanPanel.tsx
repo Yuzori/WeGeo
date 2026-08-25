@@ -1,5 +1,8 @@
-import { Radar } from 'lucide-react';
-import { cx } from './ui';
+import { useEffect, useState } from 'react';
+import { Radio, Square } from 'lucide-react';
+import type { Lead } from '../../shared/types';
+import { MiniMap } from './MapView';
+import { Button, Counter, cx } from './ui';
 
 export interface ScanProgress {
   message: string;
@@ -8,58 +11,94 @@ export interface ScanProgress {
   ratio: number;
 }
 
-/** Panneau affiché pendant une recherche : radar animé, journal et compteurs. */
-export function ScanPanel({ progress, log }: { progress: ScanProgress; log: string[] }) {
+/** Chronomètre de la recherche en cours. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, []);
+
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  return (
+    <span className="tnum">
+      {String(Math.floor(seconds / 60)).padStart(2, '0')}:{String(seconds % 60).padStart(2, '0')}
+    </span>
+  );
+}
+
+/**
+ * Poste de commandement d'une recherche : radar des positions trouvées,
+ * compteurs, journal des étapes et barre d'avancement.
+ */
+export function ScanPanel({
+  progress,
+  log,
+  leads,
+  startedAt,
+  onStop,
+  onExpandMap,
+}: {
+  progress: ScanProgress;
+  log: string[];
+  leads: Lead[];
+  startedAt: number;
+  onStop?: () => void;
+  onExpandMap?: () => void;
+}) {
   const percent = Math.round(Math.min(1, progress.ratio) * 100);
 
   return (
-    <section className="card animate-in overflow-hidden">
-      <div className="flex flex-wrap items-center gap-4 px-5 py-4">
-        {/* Radar */}
-        <span className="relative flex size-11 shrink-0 items-center justify-center">
-          <span className="sonar-ring absolute inset-0 rounded-full bg-accent/25" aria-hidden />
-          <span
-            className="sonar-ring absolute inset-0 rounded-full bg-accent/20"
-            style={{ animationDelay: '0.7s' }}
-            aria-hidden
-          />
-          <span className="relative flex size-11 items-center justify-center rounded-full bg-accent-soft text-accent-text">
-            <Radar className="size-5 animate-pulse" />
-          </span>
+    <section className="sheet-raised overflow-hidden">
+      <header className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-2.5">
+        <span className="relative flex size-2 shrink-0" aria-hidden>
+          <span className="ping-ring absolute inset-0 rounded-full bg-lime-deep" />
+          <span className="relative size-2 rounded-full bg-lime-deep" />
         </span>
+        <span className="legend text-lime-deep">balayage en cours</span>
+        <span className="legend ml-auto">
+          <Elapsed since={startedAt} />
+        </span>
+        {onStop && (
+          <Button size="sm" variant="ghost" icon={<Square className="size-3.5" />} onClick={onStop}>
+            Arrêter
+          </Button>
+        )}
+      </header>
 
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-text">{progress.message}</p>
-          <p className="mt-0.5 text-xs text-subtle">Recherche en cours — vous pouvez déjà trier les résultats.</p>
-        </div>
+      <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,200px)_1fr]">
+        <MiniMap leads={leads} onExpand={onExpandMap} className="mx-auto w-full max-w-[220px]" />
 
-        <div className="flex gap-6">
-          <Counter value={progress.scanned} label="inspectées" />
-          <Counter value={progress.found} label="retenues" accent />
+        <div className="flex min-w-0 flex-col">
+          <div className="grid grid-cols-2 gap-3">
+            <Readout value={progress.scanned} label="fiches inspectées" />
+            <Readout value={progress.found} label="sans site web" accent />
+          </div>
+
+          <p className="mt-4 truncate text-sm font-medium">{progress.message}</p>
+
+          {/* Journal : les lignes remontent au fil des étapes. */}
+          <ul className="mt-2 min-h-14 flex-1 space-y-0.5 overflow-hidden">
+            {log.slice(-3).map((line, index, all) => (
+              <li
+                key={`${line}-${index}`}
+                className={cx(
+                  'tick-in truncate font-mono text-[11px]',
+                  index === all.length - 1 ? 'text-muted' : 'text-faint opacity-55',
+                )}
+              >
+                <Radio className="mr-1 inline size-2.5" aria-hidden /> {line}
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
-      {/* Journal des dernières étapes */}
-      {log.length > 1 && (
-        <ul className="scroll-slim max-h-24 overflow-hidden border-t border-line px-5 py-2">
-          {log.slice(-3).map((line, index, all) => (
-            <li
-              key={`${line}-${index}`}
-              className={cx(
-                'truncate py-0.5 text-xs transition-opacity',
-                index === all.length - 1 ? 'text-muted' : 'text-subtle opacity-60',
-              )}
-            >
-              {line}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="h-1 overflow-hidden bg-surface-3">
+      <div className="h-[3px] overflow-hidden bg-card-3">
         {progress.ratio > 0 ? (
           <div
-            className="h-full rounded-r-full bg-accent transition-all duration-700 ease-[var(--ease-out-quint)]"
+            className="h-full bg-lime-deep transition-all duration-700 ease-[var(--ease-out-quint)]"
             style={{ width: `${percent}%` }}
           />
         ) : (
@@ -70,13 +109,19 @@ export function ScanPanel({ progress, log }: { progress: ScanProgress; log: stri
   );
 }
 
-function Counter({ value, label, accent }: { value: number; label: string; accent?: boolean }) {
+function Readout({ value, label, accent }: { value: number; label: string; accent?: boolean }) {
   return (
-    <div className="text-right">
-      <div className={cx('tnum text-xl leading-none font-semibold', accent ? 'text-accent-text' : 'text-text')}>
-        {value}
-      </div>
-      <div className="mt-1 text-[11px] text-subtle">{label}</div>
+    <div
+      className={cx(
+        'rounded-md border px-3 py-2',
+        accent ? 'border-lime-line bg-lime-soft' : 'border-rule bg-card-2',
+      )}
+    >
+      <Counter
+        value={value}
+        className={cx('block text-2xl leading-none font-semibold', accent && 'text-lime-deep')}
+      />
+      <div className="legend mt-1.5">{label}</div>
     </div>
   );
 }

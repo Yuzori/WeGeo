@@ -68,7 +68,7 @@ export function toTsv(leads: Lead[]): string {
 
 export async function toXlsx(leads: Lead[], sheetName = 'Prospection'): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'WeGeo';
+  wb.creator = 'Prospy';
   wb.created = new Date();
 
   const ws = wb.addWorksheet(sheetName.slice(0, 30), {
@@ -109,5 +109,5 @@ export function safeFileName(parts: (string | undefined | null)[], ext: string):
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .toLowerCase();
-  return `${base || 'wegeo'}.${ext}`;
+  return `${base || 'prospy'}.${ext}`;
 }

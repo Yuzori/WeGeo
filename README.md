@@ -1,8 +1,10 @@
-# WeGeo
+# Prospy
 
-Outil de prospection locale : WeGeo parcourt Google Maps pour trouver **les entreprises qui n'ont pas de site web**, dans la ville et les métiers de votre choix, puis vous aide à les appeler une par une jusqu'à la signature.
+Outil de prospection locale : Prospy parcourt Google Maps pour trouver **les entreprises qui n'ont pas de site web**, dans la ville et les métiers de votre choix, puis vous aide à les appeler une par une jusqu'à la signature.
 
-Aucune clé d'API, aucun quota, aucun abonnement : un vrai navigateur lit les pages comme le ferait un humain, et tout reste sur votre ordinateur.
+Les comptes sont isolés. Les cartes bancaires sont collectées par Stripe, jamais stockées par Prospy. Sans clés Stripe, l’outil reste utilisable en local après inscription.
+
+La landing est sur `/`. L’application est sur `/app`.
 
 ---
 
@@ -21,7 +23,7 @@ npm run setup     # télécharge le navigateur utilisé pour le scraping (~150 M
 npm run dev
 ```
 
-Puis ouvrez **http://localhost:5173**.
+Puis ouvrez **http://localhost:5173**. La page d’accueil présente l’outil ; l’espace de travail est **http://localhost:5173/app** (compte requis).
 
 Pour un usage quotidien, vous pouvez compiler l'interface une fois et ne lancer qu'un seul serveur :
 
@@ -36,14 +38,14 @@ npm start         # tout est servi sur http://localhost:4319
 
 ### 1. Rechercher
 
-Choisissez une **ville** et un ou plusieurs **métiers** (coiffeur, plombier, restaurant…). WeGeo ouvre Google Maps, déroule toute la liste des résultats, et ne garde que les entreprises sans site web. Les fiches apparaissent en direct, avec :
+Choisissez une **ville** et un ou plusieurs **métiers** (coiffeur, plombier, restaurant…). Prospy ouvre Google Maps, déroule toute la liste des résultats, et ne garde que les entreprises sans site web. Les fiches apparaissent en direct, avec :
 
 - le **téléphone**, cliquable pour appeler et copiable en un clic ;
 - l'**adresse** complète, cliquable pour ouvrir le plan ;
 - un lien direct vers la **fiche Google Maps** ;
 - la note et le nombre d'avis, utiles pour juger de l'activité du commerce.
 
-La détection se fait en deux temps : WeGeo écarte d'abord les entreprises qui affichent un bouton « Site Web » dans la liste, puis ouvre la fiche de chaque entreprise retenue pour confirmer l'absence de site et récupérer l'adresse et le téléphone exacts.
+La détection se fait en deux temps : Prospy écarte d'abord les entreprises qui affichent un bouton « Site Web » dans la liste, puis ouvre la fiche de chaque entreprise retenue pour confirmer l'absence de site et récupérer l'adresse et le téléphone exacts.
 
 ### 2. Trier
 
@@ -87,9 +89,9 @@ Le quadrillage s'appuie sur OpenStreetMap pour délimiter la commune. Comme plus
 
 ## Bon à savoir
 
-- **Une recherche à la fois.** Le navigateur est partagé. En revanche, à l'intérieur d'une recherche, WeGeo explore jusqu'à trois métiers (ou secteurs) simultanément.
+- **Une recherche à la fois.** Le navigateur est partagé. En revanche, à l'intérieur d'une recherche, Prospy explore jusqu'à trois métiers (ou secteurs) simultanément.
 - **Durée.** Comptez une dizaine de secondes pour trois métiers dans une petite ville, quelques minutes avec le quadrillage sur une grande ville.
-- **Blocages passagers.** Si Google refuse de servir une liste, WeGeo réessaie deux fois après une pause. Si un métier reste illisible, la recherche le signale dans l'historique au lieu de rendre zéro résultat sans explication.
+- **Blocages passagers.** Si Google refuse de servir une liste, Prospy réessaie deux fois après une pause. Si un métier reste illisible, la recherche le signale dans l'historique au lieu de rendre zéro résultat sans explication.
 - **Thème sombre.** Le sélecteur en bas de la barre latérale suit par défaut le réglage de votre système.
 - **Doublons.** Chaque entreprise est identifiée par son identifiant Google : elle ne sera jamais enregistrée deux fois, même si elle remonte sur plusieurs métiers ou secteurs.
 - **Vos données.** Tout est stocké dans `data/wegeo.db` (SQLite), sur votre machine. Sauvegardez ce fichier pour conserver votre prospection.
@@ -97,7 +99,7 @@ Le quadrillage s'appuie sur OpenStreetMap pour délimiter la commune. Comme plus
 
 ## Si les résultats deviennent incomplets
 
-Google modifie régulièrement la structure de ses pages. Deux outils de diagnostic affichent ce que WeGeo lit réellement :
+Google modifie régulièrement la structure de ses pages. Deux outils de diagnostic affichent ce que Prospy lit réellement :
 
 ```bash
 npm run probe -- "coiffeur" "Annecy" 15        # ce qui est lu dans la liste de résultats
@@ -115,16 +117,23 @@ Ajoutez `RAW=1` devant la première commande pour voir le texte brut de chaque c
 | `PORT` | Port du serveur | `4319` |
 | `WEGEO_DB` | Emplacement de la base | `data/wegeo.db` |
 | `WEGEO_BROWSER_DIR` | Profil du navigateur | `data/browser` |
-| `WEGEO_PASSWORD` | Mot de passe d'accès. **À définir dès que le site est exposé à Internet** | aucun (accès libre) |
 | `WEGEO_HEADFUL` | `1` pour afficher le navigateur | désactivé |
 | `WEGEO_DEBUG` | `1` pour détailler les erreurs de scraping | désactivé |
 | `WEGEO_NO_SANDBOX` | `1` si Chromium tourne en root (conteneur) | désactivé |
 | `WEGEO_TASK_CONCURRENCY` | Métiers explorés en parallèle | `3` |
 | `WEGEO_DETAIL_CONCURRENCY` | Fiches vérifiées en parallèle | `3` (ou `6` sur un seul métier) |
+| `APP_URL` | URL publique (liens de retour Stripe) | origine de la requête |
+| `SESSION_SECRET` | Poivre des jetons de session | vide (dev) |
+| `STRIPE_SECRET_KEY` | Clé secrète Stripe (`sk_…`) | désactivé |
+| `STRIPE_PUBLISHABLE_KEY` | Clé publiable (`pk_…`) | désactivé |
+| `STRIPE_WEBHOOK_SECRET` | Secret de signature des webhooks | désactivé |
+| `STRIPE_PRICE_*` | Price IDs `starter` / `pro` / `agence` | — |
+
+Les variables `WEGEO_*` et le fichier `data/wegeo.db` gardent leur nom historique : les changer casserait un déploiement déjà en place. Les clés `wegeo.theme`, `wegeo.city`, etc. dans le navigateur sont aussi conservées pour ne pas perdre les réglages locaux.
 
 ## Accéder au site à distance
 
-WeGeo n'est pas un site statique : il lui faut un serveur, car il pilote un vrai
+Prospy n'est pas un site statique : il lui faut un serveur, car il pilote un vrai
 Chromium et conserve vos fiches dans une base SQLite. Deux façons d'y accéder
 en déplacement.
 
@@ -132,21 +141,23 @@ en déplacement.
 l'emploi sur Render (Docker, disque persistant pour la base). Deux contraintes :
 Chromium ne tient pas dans 512 Mo, il faut donc une instance de 2 Go ; et les
 recherches partent d'une IP de centre de données, que Google bloque bien plus
-volontiers qu'une connexion résidentielle. Définissez `WEGEO_PASSWORD`, sinon
-votre prospection est publique.
+volontiers qu'une connexion résidentielle.
 
-**Depuis votre machine.** Laissez WeGeo tourner chez vous et ouvrez-y un accès
+**Depuis votre machine.** Laissez Prospy tourner chez vous et ouvrez-y un accès
 par un tunnel (`cloudflared tunnel --url http://localhost:4319`). C'est gratuit,
 le scraping reste fiable puisqu'il part de votre connexion, et les données ne
-quittent pas votre disque. En revanche l'ordinateur doit rester allumé. Là aussi,
-définissez `WEGEO_PASSWORD` avant d'ouvrir le tunnel.
+quittent pas votre disque. En revanche l'ordinateur doit rester allumé.
+
+L’API exige une session. Chaque compte ne voit que ses fiches. Placez `APP_URL` et `SESSION_SECRET` en production, et servez le site en HTTPS.
 
 ## Architecture
 
 ```
 shared/types.ts        Contrat commun serveur / interface
 server/
-  index.ts             API Express + flux d'évènements (SSE)
+  index.ts             API Express, auth, Stripe, SSE
+  auth.ts              Comptes et sessions
+  billing.ts           Checkout embarqué et webhooks
   db.ts                Base SQLite (module natif de Node)
   search-runner.ts     Orchestration : métiers × secteurs, déduplication, filtres
   export.ts            Génération CSV / XLSX
@@ -159,4 +170,4 @@ src/                   Interface React (Vite + Tailwind)
 
 ## Usage
 
-WeGeo lit des informations publiques affichées par Google Maps, à un rythme modéré, pour un usage professionnel de prospection. Restez raisonnable sur le volume : enchaîner des dizaines de milliers de fiches d'affilée finirait par déclencher un blocage temporaire de Google.
+Prospy lit des informations publiques affichées par Google Maps, à un rythme modéré, pour un usage professionnel de prospection. Restez raisonnable sur le volume : enchaîner des dizaines de milliers de fiches d'affilée finirait par déclencher un blocage temporaire de Google.

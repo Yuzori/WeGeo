@@ -1,4 +1,12 @@
-import type { Lead, LeadStatus, SearchOptions, SearchRecord, Stats } from '../shared/types';
+import type {
+  BillingPublicConfig,
+  Lead,
+  LeadStatus,
+  PublicUser,
+  SearchOptions,
+  SearchRecord,
+  Stats,
+} from '../shared/types';
 
 export interface LeadQuery {
   status?: LeadStatus;
@@ -21,6 +29,7 @@ function qs(params: object): string {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
+    credentials: 'include',
     headers: init?.body ? { 'Content-Type': 'application/json', ...init?.headers } : init?.headers,
   });
 
@@ -62,6 +71,10 @@ export const api = {
 
   cancelSearch: (id: number) => request<{ cancelled: boolean }>(`/api/searches/${id}/cancel`, { method: 'POST' }),
 
+  resumeSearch: (id: number) => request<{ searchId: number }>(`/api/searches/${id}/resume`, { method: 'POST' }),
+
+  search: (id: number) => request<SearchRecord>(`/api/searches/${id}`),
+
   searches: () => request<SearchRecord[]>('/api/searches'),
 
   searchLeads: (id: number) => request<Lead[]>(`/api/searches/${id}/leads`),
@@ -73,12 +86,58 @@ export const api = {
 
   /** Contenu TSV, prêt à être collé dans Google Sheets. */
   tsv: async (query: LeadQuery = {}): Promise<string> => {
-    const res = await fetch(`/api/export/tsv${qs(query)}`);
+    const res = await fetch(`/api/export/tsv${qs(query)}`, { credentials: 'include' });
     if (!res.ok) throw new Error("L'export a échoué.");
     return res.text();
   },
 
   downloadUrl: (format: 'csv' | 'xlsx', query: LeadQuery = {}) => `/api/export/${format}${qs(query)}`,
+
+  me: () => request<{ user: PublicUser | null }>('/api/auth/me'),
+  authMethods: () => request<{ google: boolean; mail: boolean }>('/api/auth/methods'),
+  login: (email: string, password: string, locale?: string) =>
+    request<{ user: PublicUser } | { needsCode: true; purpose: 'verify' }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, locale }),
+    }),
+  register: (email: string, password: string, locale?: string) =>
+    request<{ needsCode: true; purpose: 'verify' }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, locale }),
+    }),
+  verify: (email: string, code: string, purpose: string) =>
+    request<{ user: PublicUser }>('/api/auth/verify', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, purpose }),
+    }),
+  resendCode: (email: string, purpose: string, locale?: string) =>
+    request<{ ok: true }>('/api/auth/resend', {
+      method: 'POST',
+      body: JSON.stringify({ email, purpose, locale }),
+    }),
+  forgot: (email: string, locale?: string) =>
+    request<{ ok: true }>('/api/auth/forgot', { method: 'POST', body: JSON.stringify({ email, locale }) }),
+  resetPassword: (email: string, code: string, password: string) =>
+    request<{ user: PublicUser }>('/api/auth/reset', {
+      method: 'POST',
+      body: JSON.stringify({ email, code, password }),
+    }),
+  googleUrl: (next = '/app', link = false) =>
+    `/api/auth/google?next=${encodeURIComponent(next)}${link ? '&link=1' : ''}`,
+  logout: () => request<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+
+  exportSheets: (query: LeadQuery = {}) =>
+    request<{ url: string; id: string }>(`/api/export/sheets${qs(query)}`, { method: 'POST' }),
+
+  billingConfig: () => request<BillingPublicConfig>('/api/billing/config'),
+  checkout: (plan: string) =>
+    request<{ clientSecret: string }>('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan }) }),
+  billingPortal: () => request<{ url: string }>('/api/billing/portal', { method: 'POST' }),
+  confirmCheckout: (sessionId: string) =>
+    request<{ user: PublicUser }>('/api/billing/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    }),
 };
 
 /** Ouvre le flux d'évènements d'une recherche en cours. */

@@ -1,50 +1,68 @@
 import { Link } from 'react-router-dom';
 import { Check, Inbox, Star, TrendingUp } from 'lucide-react';
 import type { Stats } from '../../shared/types';
-import { cx } from './ui';
+import { Counter, cx } from './ui';
 
 /** Bandeau de chiffres clés, cliquable pour aller directement au bon onglet. */
 export function StatStrip({ stats }: { stats: Stats }) {
-  const signable = stats.termine + stats.perdu;
-  const rate = signable ? Math.round((stats.termine / signable) * 100) : null;
+  const decided = stats.termine + stats.perdu;
+  const rate = decided ? Math.round((stats.termine / decided) * 100) : null;
 
   const tiles = [
-    { to: '/a-trier', label: 'À trier', value: stats.nouveau, icon: Inbox },
-    { to: '/favoris', label: 'À appeler', value: stats.favori, icon: Star },
-    { to: '/signes', label: 'Signés', value: stats.termine, icon: Check },
+    { to: '/app/a-trier', label: 'à trier', value: stats.nouveau, icon: Inbox },
+    { to: '/app/favoris', label: 'à appeler', value: stats.favori, icon: Star },
+    { to: '/app/signes', label: 'signés', value: stats.termine, icon: Check },
     {
-      to: '/signes',
-      label: 'Taux de signature',
-      value: rate === null ? '—' : `${rate}%`,
+      to: '/app/signes',
+      label: 'taux de signature',
+      value: rate,
+      suffix: '%',
       icon: TrendingUp,
       accent: true,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-      {tiles.map(({ to, label, value, icon: Icon, accent }, index) => (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {tiles.map(({ to, label, value, suffix, icon: Icon, accent }, index) => (
         <Link
           key={label}
           to={to}
-          style={{ animationDelay: `${index * 45}ms` }}
+          style={{ animationDelay: `${index * 40}ms` }}
           className={cx(
-            'card animate-in group flex items-center gap-3 px-3.5 py-3 transition-all duration-200',
-            'hover:-translate-y-0.5 hover:border-accent-line hover:shadow-[var(--shadow-lift)]',
+            'sheet rise-in group relative overflow-hidden px-3 py-2.5 transition-all duration-200',
+            'hover:-translate-y-0.5 hover:border-rule-strong hover:shadow-[var(--shadow-raised)]',
           )}
         >
+          {/* Graduation d'échelle, en haut de la tuile. */}
           <span
-            className={cx(
-              'flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors',
-              accent ? 'bg-accent text-accent-contrast' : 'bg-accent-soft text-accent-text',
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1.5 opacity-40"
+            style={{
+              backgroundImage: 'repeating-linear-gradient(90deg, var(--rule-strong) 0 1px, transparent 1px 6px)',
+            }}
+          />
+
+          <div className="flex items-baseline gap-1.5">
+            {value === null ? (
+              <span className="tnum text-2xl leading-none font-semibold text-faint">—</span>
+            ) : (
+              <Counter
+                value={value}
+                className={cx('text-2xl leading-none font-semibold', accent && 'text-lime-deep')}
+              />
             )}
-          >
-            <Icon className="size-4" />
-          </span>
-          <span className="min-w-0">
-            <span className="tnum block text-xl leading-none font-semibold text-text">{value}</span>
-            <span className="mt-1 block truncate text-[11px] text-subtle">{label}</span>
-          </span>
+            {suffix && value !== null && (
+              <span className={cx('text-sm font-medium', accent ? 'text-lime-deep' : 'text-faint')}>{suffix}</span>
+            )}
+            <Icon
+              className={cx(
+                'ml-auto size-3.5 transition-all duration-300 group-hover:-rotate-12',
+                accent ? 'text-lime-deep' : 'text-faint',
+              )}
+            />
+          </div>
+          <span className="legend mt-1.5 block truncate">{label}</span>
         </Link>
       ))}
     </div>

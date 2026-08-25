@@ -1,4 +1,4 @@
-# Image de déploiement de WeGeo : Node 24 (requis par le module SQLite natif)
+# Image de déploiement de Prospy : Node 24 (requis par le module SQLite natif)
 # plus Chromium et ses dépendances système, indispensables au scraping.
 FROM node:24-bookworm-slim
 
