@@ -5,10 +5,11 @@
  */
 
 import { EventEmitter } from 'node:events';
-import type { ScrapeEvent, SearchOptions, SearchRecord, SearchRequest } from '../shared/types.ts';
+import type { Lead, ScrapeEvent, SearchOptions, SearchRecord, SearchRequest } from '../shared/types.ts';
 import * as db from './db.ts';
 import { buildGrid, geocodeCity, type Tile } from './scraper/geo.ts';
 import { fetchPlaceDetailsBatch, scrapeList, type RawCard } from './scraper/maps.ts';
+import { lookupDirigeant } from './scraper/sirene.ts';
 import {
   classifyWebsite,
   cleanMapsUrl,
@@ -69,12 +70,12 @@ function scheduleCleanup(id: number) {
 }
 
 /** Lance la recherche en tâche de fond et renvoie son identifiant. */
-export function startSearch(request: SearchRequest, userId: number): number {
+export function startSearch(request: SearchRequest, workspaceId: number, userId: number): number {
   const city = request.city.trim();
   const domains = request.domains.map((d) => d.trim()).filter(Boolean);
   const options = request.options;
 
-  const record = db.createSearch(userId, city, domains, options);
+  const record = db.createSearch(workspaceId, userId, city, domains, options);
   launch(record);
   return record.id;
 }
@@ -83,13 +84,13 @@ export function startSearch(request: SearchRequest, userId: number): number {
  * Reprend une recherche arrêtée : les métiers déjà parcourus sont sautés, les
  * compteurs repartent de leur dernière valeur.
  */
-export function resumeSearch(id: number, userId: number): boolean {
-  const existing = db.getSearch(id, userId);
+export function resumeSearch(id: number, workspaceId: number): boolean {
+  const existing = db.getSearch(id, workspaceId);
   if (!existing || existing.status === 'en_cours') return false;
   if (existing.totalTasks === null || existing.doneTasks >= existing.totalTasks) return false;
 
   const record = db.reopenSearch(id);
-  if (!record || record.userId !== userId) return false;
+  if (!record || record.workspaceId !== workspaceId) return false;
   launch(record);
   return true;
 }
@@ -166,31 +167,50 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
     });
   }
 
-  const handled = options.excludeHandled ? db.handledPlaceKeys(record.userId) : new Set<string>();
+  const handled = options.excludeHandled ? db.handledPlaceKeys(record.workspaceId) : new Set<string>();
   const seenKeys = new Set<string>();
   // Une reprise continue les compteurs de la recherche au lieu de repartir de zéro.
   let scanned = record.scanned;
   let found = record.found;
   let done = alreadyDone.size;
 
-  // Plusieurs métiers sont explorés de front. On garde des chiffres modestes :
-  // chaque tâche ouvre elle-même plusieurs onglets pour vérifier les fiches.
-  // Sur une machine peu dotée en mémoire, les deux réglages sont abaissables.
-  const taskConcurrency = Math.min(tasks.length, envLimit('WEGEO_TASK_CONCURRENCY', 3));
-  const detailConcurrency = envLimit('WEGEO_DETAIL_CONCURRENCY', taskConcurrency > 1 ? 3 : 6);
+  // Plusieurs métiers en parallèle. Le plafond de fiches détaillées est géré
+  // globalement dans le scraper : on n’ouvre pas un pool d’onglets par métier.
+  const taskConcurrency = Math.min(tasks.length, envLimit('WEGEO_TASK_CONCURRENCY', 4));
 
   const emit = (message: string) =>
     run.push({ type: 'progress', message, scanned, found, taskIndex: done, totalTasks });
 
   let cursor = 0;
   const failures: string[] = [];
+  const enrichments: Promise<void>[] = [];
+
+  const attachDirigeant = (lead: Lead, candidate: Candidate) => {
+    if (lead.dirigeantStatus === 'found' && lead.dirigeant) return;
+    enrichments.push(
+      lookupDirigeant({ name: candidate.name, address: candidate.address, city: candidate.city })
+        .then((hit) => {
+          const updated = db.setLeadDirigeant(lead.id, {
+            name: hit.name,
+            source: hit.source,
+            status: hit.name ? 'found' : 'missing',
+          });
+          if (updated) run.push({ type: 'lead', lead: updated });
+        })
+        .catch(() => {}),
+    );
+  };
 
   /** Enregistre une entreprise retenue et l'envoie aussitôt à l'écran. */
   const publish = (candidate: Candidate): void => {
     if (options.onlyWithoutWebsite && !isTarget(candidate, options)) return;
     if (options.requirePhone && !candidate.phone) return;
 
-    const { lead, isNew } = db.upsertLead({ ...candidate, userId: record.userId });
+    const { lead, isNew } = db.upsertLead({
+      ...candidate,
+      workspaceId: record.workspaceId,
+      userId: record.userId,
+    });
     db.linkSearchLead(run.id, lead.id);
 
     // Une fiche déjà classée par l'utilisateur ne réapparaît pas.
@@ -198,6 +218,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
 
     found++;
     run.push({ type: 'lead', lead });
+    attachDirigeant(lead, candidate);
   };
 
   const worker = async (): Promise<void> => {
@@ -245,6 +266,10 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
       if (options.deepCheck && candidates.length && !isCancelled()) {
         let checked = 0;
         emit(`« ${domain} » à ${where} : vérification de ${candidates.length} fiches…`);
+        // L’API SIRENE tourne pendant l’ouverture des fiches Maps.
+        for (const candidate of candidates) {
+          void lookupDirigeant({ name: candidate.name, address: candidate.address, city: candidate.city });
+        }
 
         await fetchPlaceDetailsBatch(
           candidates,
@@ -256,10 +281,13 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
             publish(c);
             emit(`« ${domain} » à ${where} : ${checked}/${candidates.length} fiches vérifiées`);
           },
-          { concurrency: detailConcurrency, isCancelled },
+          { isCancelled },
         );
       } else {
-        for (const candidate of candidates) publish(candidate);
+        for (const candidate of candidates) {
+          void lookupDirigeant({ name: candidate.name, address: candidate.address, city: candidate.city });
+          publish(candidate);
+        }
       }
 
       done++;
@@ -271,6 +299,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
   };
 
   await Promise.all(Array.from({ length: taskConcurrency }, worker));
+  await Promise.allSettled(enrichments);
 
   // Une recherche qui n'a rien pu lire doit le dire clairement.
   const allFailed = tasks.length > 0 && failures.length === tasks.length;
@@ -283,13 +312,13 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
   scheduleCleanup(run.id);
 }
 
-/** Lit une limite de parallélisme dans l'environnement, entre 1 et 6. */
+/** Lit une limite de parallélisme dans l'environnement, entre 1 et 16. */
 function envLimit(name: string, fallback: number): number {
   const value = Number(process.env[name]);
-  return Number.isFinite(value) && value >= 1 ? Math.min(6, Math.floor(value)) : fallback;
+  return Number.isFinite(value) && value >= 1 ? Math.min(16, Math.floor(value)) : fallback;
 }
 
-interface Candidate extends Omit<db.LeadInput, 'userId'> {
+interface Candidate extends Omit<db.LeadInput, 'userId' | 'workspaceId'> {
   verified?: boolean;
 }
 

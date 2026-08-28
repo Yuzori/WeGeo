@@ -57,6 +57,8 @@ export async function exchangeGoogleCode(req: Request, code: string) {
   return {
     email,
     googleId,
+    name: payload.given_name?.trim() || payload.name?.trim() || '',
+    picture: payload.picture?.trim() || null,
     refreshToken: tokens.refresh_token ?? null,
     accessToken: tokens.access_token ?? null,
     expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,

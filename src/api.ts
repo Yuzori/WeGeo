@@ -1,11 +1,15 @@
 import type {
+  AccountStats,
   BillingPublicConfig,
   Lead,
   LeadStatus,
+  PeopleMatch,
   PublicUser,
   SearchOptions,
   SearchRecord,
   Stats,
+  Workspace,
+  WorkspaceInvite,
 } from '../shared/types';
 
 export interface LeadQuery {
@@ -26,11 +30,26 @@ function qs(params: object): string {
   return s ? `?${s}` : '';
 }
 
+let workspaceId: number | null = null;
+
+export function setApiWorkspace(id: number | null): void {
+  workspaceId = id && Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function scoped(url: string): string {
+  if (!workspaceId) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}workspaceId=${workspaceId}`;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(scoped(url), {
     ...init,
     credentials: 'include',
-    headers: init?.body ? { 'Content-Type': 'application/json', ...init?.headers } : init?.headers,
+    headers: {
+      ...(workspaceId ? { 'X-Workspace-Id': String(workspaceId) } : {}),
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
+    },
   });
 
   if (!res.ok) {
@@ -47,7 +66,15 @@ export interface Meta {
   activeSearches: number[];
 }
 
+export interface VisitorPlace {
+  city: string;
+  lat: number;
+  lng: number;
+}
+
 export const api = {
+  locate: () => request<VisitorPlace | null>('/api/locate'),
+
   meta: () => request<Meta>('/api/meta'),
 
   leads: (query: LeadQuery = {}) => request<Lead[]>(`/api/leads${qs(query)}`),
@@ -91,19 +118,20 @@ export const api = {
     return res.text();
   },
 
-  downloadUrl: (format: 'csv' | 'xlsx', query: LeadQuery = {}) => `/api/export/${format}${qs(query)}`,
+  downloadUrl: (format: 'csv' | 'xlsx', query: LeadQuery = {}) =>
+    scoped(`/api/export/${format}${qs(query)}`),
 
   me: () => request<{ user: PublicUser | null }>('/api/auth/me'),
   authMethods: () => request<{ google: boolean; mail: boolean }>('/api/auth/methods'),
-  login: (email: string, password: string, locale?: string) =>
-    request<{ user: PublicUser } | { needsCode: true; purpose: 'verify' }>('/api/auth/login', {
+  login: (identifier: string, password: string, locale?: string) =>
+    request<{ user: PublicUser } | { needsCode: true; purpose: 'verify'; email: string }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password, locale }),
+      body: JSON.stringify({ identifier, email: identifier, password, locale }),
     }),
-  register: (email: string, password: string, locale?: string) =>
+  register: (email: string, password: string, locale?: string, username?: string, avatar?: string | null) =>
     request<{ needsCode: true; purpose: 'verify' }>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, locale }),
+      body: JSON.stringify({ email, password, locale, username, avatar: avatar || undefined }),
     }),
   verify: (email: string, code: string, purpose: string) =>
     request<{ user: PublicUser }>('/api/auth/verify', {
@@ -125,6 +153,17 @@ export const api = {
   googleUrl: (next = '/app', link = false) =>
     `/api/auth/google?next=${encodeURIComponent(next)}${link ? '&link=1' : ''}`,
   logout: () => request<{ ok: true }>('/api/auth/logout', { method: 'POST' }),
+  claimUsername: (username: string) =>
+    request<{ user: PublicUser }>('/api/auth/username', {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    }),
+  updateProfile: (body: { username?: string; password?: string; currentPassword?: string; avatar?: string | null }) =>
+    request<{ user: PublicUser }>('/api/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  accountStats: () => request<AccountStats>('/api/auth/stats'),
 
   exportSheets: (query: LeadQuery = {}) =>
     request<{ url: string; id: string }>(`/api/export/sheets${qs(query)}`, { method: 'POST' }),
@@ -138,6 +177,33 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sessionId }),
     }),
+
+  workspaces: () => request<{ workspaces: Workspace[]; invites: WorkspaceInvite[] }>('/api/workspaces'),
+  workspaceInvites: () => request<{ invites: WorkspaceInvite[] }>('/api/workspaces/invites'),
+  workspace: (id: number) => request<{ workspace: Workspace }>(`/api/workspaces/${id}`),
+  createWorkspace: (name: string) =>
+    request<{ workspace: Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameWorkspace: (id: number, name: string) =>
+    request<{ workspace: Workspace }>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  leaveWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}/leave`, { method: 'POST' }),
+  lookupPerson: (query: string) =>
+    request<{ found: boolean; email: string }>('/api/workspaces/lookup', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    }),
+  searchPeople: (q: string) =>
+    request<{ people: PeopleMatch[] }>(`/api/workspaces/people${qs({ q })}`),
+  inviteToWorkspace: (id: number, query: string, locale?: string) =>
+    request<{ ok: true; email: string; workspace: Workspace }>(`/api/workspaces/${id}/invites`, {
+      method: 'POST',
+      body: JSON.stringify({ query, email: query, locale }),
+    }),
+  acceptInvite: (id: number) =>
+    request<{ workspace: Workspace }>(`/api/workspaces/invites/${id}/accept`, { method: 'POST' }),
+  declineInvite: (id: number) => request<{ ok: true }>(`/api/workspaces/invites/${id}/decline`, { method: 'POST' }),
+  removeMember: (workspaceId: number, userId: number) =>
+    request<{ workspace: Workspace }>(`/api/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
 };
 
 /** Ouvre le flux d'évènements d'une recherche en cours. */
@@ -146,7 +212,7 @@ export function openSearchStream(
   onEvent: (event: import('../shared/types').ScrapeEvent) => void,
   onClose?: () => void,
 ): () => void {
-  const source = new EventSource(`/api/searches/${searchId}/stream`);
+  const source = new EventSource(scoped(`/api/searches/${searchId}/stream`));
 
   source.onmessage = (message) => {
     try {

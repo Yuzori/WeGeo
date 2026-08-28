@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowDownWideNarrow, Check, PhoneCall, Star, ThumbsDown, Trash2, X } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../shared/types';
 import type { LeadCollection } from '../hooks';
 import { SORT_LABELS, sortLeads, type SortMode } from '../lib/lead';
-import { CallMode } from './CallMode';
 import { LeadCard } from './LeadCard';
 import { Button, LeadSkeleton, cx, useToast } from './ui';
+import { sessionPath } from '../workspace';
 
 interface LeadListProps {
   collection: LeadCollection;
@@ -28,9 +29,10 @@ export function LeadList({
   callable,
 }: LeadListProps) {
   const notify = useToast();
+  const navigate = useNavigate();
+  const { workspaceId } = useParams();
   const [sort, setSort] = useState<SortMode>('potentiel');
   const [selection, setSelection] = useState<Set<number>>(new Set());
-  const [calling, setCalling] = useState(false);
 
   const source = leads ?? collection.leads;
   const rows = useMemo(() => sortLeads(source, sort), [source, sort]);
@@ -124,7 +126,7 @@ export function LeadList({
             variant="soft"
             className="ml-auto"
             icon={<PhoneCall className="size-3.5" />}
-            onClick={() => setCalling(true)}
+            onClick={() => navigate(sessionPath(workspaceId ?? '', '/appels'))}
           >
             Session d’appels
           </Button>
@@ -145,19 +147,10 @@ export function LeadList({
         />
       ))}
 
-      {calling && (
-        <CallMode
-          leads={rows}
-          onStatus={collection.setStatus}
-          onNotes={collection.setNotes}
-          onClose={() => setCalling(false)}
-        />
-      )}
-
       {/* Actions groupées : la barre monte quand une fiche est cochée. */}
       <div
         className={cx(
-          'pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4',
+          'pointer-events-none fixed inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 flex justify-center px-3 lg:left-[16.5rem]',
           'transition-all duration-300 ease-[var(--ease-out-quint)]',
           selectedIds.length ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0',
         )}

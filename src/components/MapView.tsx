@@ -8,7 +8,7 @@ const LEGEND: Tier[] = ['excellent', 'bon', 'moyen', 'faible'];
 
 /**
  * Carte plein écran : fond OpenStreetMap de la France, points GPS exacts.
- * Un clic sur un point ouvre sa fiche Google Maps.
+ * Un clic sur un point n’ouvre plus Maps : la carte sert à se situer.
  */
 export function MapView({ leads, onClose }: { leads: Lead[]; onClose: () => void }) {
   const located = leads.filter((l) => l.lat != null && l.lng != null).length;
@@ -24,7 +24,7 @@ export function MapView({ leads, onClose }: { leads: Lead[]; onClose: () => void
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[75] flex flex-col bg-paper">
+    <div className="app-stage flex flex-col bg-paper">
       <header className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-2.5">
         <span className="legend">carte de france</span>
         <span className="legend tnum">{located} positions</span>
@@ -51,8 +51,7 @@ export function MapView({ leads, onClose }: { leads: Lead[]; onClose: () => void
 
       <footer className="border-t border-rule px-4 py-2">
         <p className="legend text-center">
-          molette pour zoomer · glisser pour déplacer · les noms apparaissent en se rapprochant · clic sur un point
-          pour ouvrir Google Maps
+          molette pour zoomer · glisser pour déplacer · les noms apparaissent en se rapprochant
         </p>
       </footer>
     </div>

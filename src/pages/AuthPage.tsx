@@ -1,9 +1,15 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Eye, EyeOff } from 'lucide-react';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { UserAvatar } from '../components/UserAvatar';
+import { BrandMark } from '../components/BrandMark';
+import { LangSwitch } from '../components/LangSwitch';
 import { cx } from '../components/ui';
 import { useI18n } from '../i18n';
+import { resizeAvatar } from '../lib/avatar';
+import { markAppEnter } from '../lib/nav';
 
 function GoogleMark() {
   return (
@@ -16,23 +22,103 @@ function GoogleMark() {
   );
 }
 
+function passwordScore(password: string): number {
+  if (!password) return 0;
+  let score = 0;
+  if (password.length >= 8) score += 1;
+  if (password.length >= 12) score += 1;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^a-zA-Z0-9]/.test(password)) score += 1;
+  return Math.min(4, score);
+}
+
+function PasswordField({
+  label,
+  value,
+  onChange,
+  autoComplete,
+  showStrength,
+  strengthLabels,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  autoComplete: string;
+  showStrength?: boolean;
+  strengthLabels: [string, string, string, string];
+}) {
+  const [visible, setVisible] = useState(false);
+  const score = passwordScore(value);
+  const tone =
+    score <= 1 ? 'bg-score-low' : score === 2 ? 'bg-score-mid' : score === 3 ? 'bg-score-good' : 'bg-score-high';
+
+  return (
+    <label className="block">
+      <span className="legend mb-1.5 block">{label}</span>
+      <div className="relative">
+        <input
+          type={visible ? 'text' : 'password'}
+          autoComplete={autoComplete}
+          required
+          minLength={8}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="field h-11 pr-11"
+        />
+        <button
+          type="button"
+          className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-1 text-faint hover:text-ink"
+          onClick={() => setVisible((open) => !open)}
+          aria-label={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+        >
+          {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+        </button>
+      </div>
+      {showStrength && value.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <div className="grid grid-cols-4 gap-1">
+            {[1, 2, 3, 4].map((step) => (
+              <span
+                key={step}
+                className={cx('h-1 rounded-full', score >= step ? tone : 'bg-card-3')}
+              />
+            ))}
+          </div>
+          <p className="text-[11px] text-faint">{strengthLabels[Math.max(0, score - 1)]}</p>
+        </div>
+      )}
+    </label>
+  );
+}
+
 export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
   const { user, setUser } = useAuth();
-  const { locale, setLocale, m } = useI18n();
+  const { locale, m } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
   const from = (location.state as { from?: string } | null)?.from ?? '/app';
 
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
-  const [step, setStep] = useState<'form' | 'code'>(mode === 'forgot' ? 'form' : 'form');
+  const [step, setStep] = useState<'form' | 'code'>('form');
   const [purpose, setPurpose] = useState<'login' | 'verify' | 'reset'>(mode === 'forgot' ? 'reset' : 'login');
   const [error, setError] = useState<string | null>(params.get('error'));
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [google, setGoogle] = useState(false);
+  const [avatar, setAvatar] = useState<string | null>(null);
+
+  const strengthLabels: [string, string, string, string] = [
+    m.auth.strengthWeak,
+    m.auth.strengthFair,
+    m.auth.strengthGood,
+    m.auth.strengthStrong,
+  ];
 
   useEffect(() => {
     const title = mode === 'login' ? m.auth.loginTitle : mode === 'register' ? m.auth.registerTitle : m.auth.forgotTitle;
@@ -44,12 +130,18 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
   }, []);
 
   if (user && mode !== 'forgot') {
+    if (user.needsUsername) return <Navigate to="/app/pseudo" replace />;
     return <Navigate to={from.startsWith('/app') ? from : '/app'} replace />;
   }
 
   const goApp = (nextUser: typeof user) => {
     if (!nextUser) return;
     setUser(nextUser);
+    if (nextUser.needsUsername) {
+      navigate('/app/pseudo', { replace: true });
+      return;
+    }
+    markAppEnter();
     navigate(from.startsWith('/app') || from === '/abonnement' ? from : '/app', { replace: true });
   };
 
@@ -65,15 +157,16 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
         setStep('code');
         setInfo(m.auth.forgotSent);
       } else if (mode === 'login') {
-        const result = await api.login(email, password, locale);
+        const result = await api.login(identifier, password, locale);
         if ('user' in result) {
           goApp(result.user);
         } else {
           setPurpose(result.purpose);
+          if (result.email) setEmail(result.email);
           setStep('code');
         }
       } else {
-        await api.register(email, password, locale);
+        await api.register(email, password, locale, username, avatar);
         setPurpose('verify');
         setStep('code');
       }
@@ -127,14 +220,12 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
 
   return (
     <div className="landing">
-      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-12">
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-3 py-10 sm:px-4 sm:py-12">
         <div className="mb-8 flex items-center justify-between">
           <Link to="/" className="inline-flex items-center gap-2 self-start">
-            <img src="/prospy.png" alt="Prospy" className="h-10 w-auto object-contain" />
+            <BrandMark alt="Prospy" className="h-10 w-10" />
           </Link>
-          <button type="button" className="lp-lang" onClick={() => setLocale(locale === 'fr' ? 'en' : 'fr')} aria-label={m.nav.lang}>
-            {locale.toUpperCase()}
-          </button>
+          <LangSwitch />
         </div>
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         <p className="mt-2 text-sm text-muted">{lead}</p>
@@ -154,30 +245,91 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
 
         {step === 'form' ? (
           <form onSubmit={(e) => void submitForm(e)} className={cx('glass space-y-3 rounded-[10px] p-5', !(google && mode !== 'forgot') && 'mt-8')}>
-            <label className="block">
-              <span className="legend mb-1.5 block">{m.auth.email}</span>
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="field h-11"
-              />
-            </label>
-            {mode !== 'forgot' && (
+            {mode === 'login' ? (
               <label className="block">
-                <span className="legend mb-1.5 block">{m.auth.password}</span>
+                <span className="legend mb-1.5 block">{m.auth.identifier}</span>
                 <input
-                  type="password"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  type="text"
+                  autoComplete="username"
                   required
-                  minLength={8}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
                   className="field h-11"
                 />
               </label>
+            ) : (
+              <label className="block">
+                <span className="legend mb-1.5 block">{m.auth.email}</span>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="field h-11"
+                />
+              </label>
+            )}
+            {mode === 'register' && (
+              <>
+                <label className="block">
+                  <span className="legend mb-1.5 block">{m.auth.username}</span>
+                  <input
+                    type="text"
+                    autoComplete="username"
+                    required
+                    minLength={3}
+                    maxLength={24}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="field h-11"
+                  />
+                </label>
+                <div className="flex items-center gap-3">
+                  <UserAvatar username={username || '?'} avatarUrl={avatar} size={48} />
+                  <div className="min-w-0 flex-1">
+                    <p className="legend">{m.auth.photo}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-faint">{m.auth.photoHint}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <label className="inline-flex h-8 cursor-pointer items-center rounded-full border border-rule px-3 text-[12px] font-medium hover:bg-card-2">
+                        {m.auth.photoChoose}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = '';
+                            if (!file) return;
+                            void resizeAvatar(file)
+                              .then(setAvatar)
+                              .catch((err: Error) => setError(err.message));
+                          }}
+                        />
+                      </label>
+                      {avatar && (
+                        <button
+                          type="button"
+                          className="text-[12px] font-medium text-muted hover:text-ink"
+                          onClick={() => setAvatar(null)}
+                        >
+                          {m.auth.photoRemove}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+            {mode !== 'forgot' && (
+              <PasswordField
+                label={m.auth.password}
+                value={password}
+                onChange={setPassword}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                showStrength={mode === 'register'}
+                strengthLabels={strengthLabels}
+              />
             )}
             {mode === 'login' && (
               <p className="text-right">
@@ -194,6 +346,19 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
             >
               {loading ? m.auth.wait : mode === 'login' ? m.auth.submitLogin : mode === 'register' ? m.auth.submitRegister : m.auth.forgotSubmit}
             </button>
+            {mode !== 'forgot' && (
+              <p className="text-[11px] leading-relaxed text-faint">
+                {m.auth.termsPrefix}{' '}
+                <Link to="/cgu" className="text-lime-deep">
+                  {m.auth.terms}
+                </Link>{' '}
+                {m.auth.termsAnd}{' '}
+                <Link to="/confidentialite" className="text-lime-deep">
+                  {m.auth.privacy}
+                </Link>
+                .
+              </p>
+            )}
           </form>
         ) : (
           <form onSubmit={(e) => void submitCode(e)} className="glass mt-8 space-y-3 rounded-[10px] p-5">
@@ -211,18 +376,14 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
               />
             </label>
             {purpose === 'reset' && (
-              <label className="block">
-                <span className="legend mb-1.5 block">{m.auth.newPassword}</span>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  minLength={8}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="field h-11"
-                />
-              </label>
+              <PasswordField
+                label={m.auth.newPassword}
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                showStrength
+                strengthLabels={strengthLabels}
+              />
             )}
             {info && <p className="text-sm text-lime-deep">{info}</p>}
             {error && <p className="text-sm text-score-low">{error}</p>}

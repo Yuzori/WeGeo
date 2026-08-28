@@ -8,10 +8,12 @@ import { createHash, createHmac, randomBytes, randomInt, scrypt, timingSafeEqual
 import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import type { PlanId, PublicUser, SubscriptionStatus } from '../shared/types.ts';
-import db from './db.ts';
+import db, { ensurePersonalWorkspace } from './db.ts';
 import { googleAuthUrl, googleConfigured, exchangeGoogleCode } from './google.ts';
 import { mailConfigured, sendCodeEmail, type MailPurpose } from './mail.ts';
+import { avatarUrl, clearAvatar, hasAvatar, saveAvatarDataUrl, saveAvatarFromUrl } from './avatars.ts';
 import { isHttpsRequest, publicBaseUrl } from './security.ts';
+import { normalizeUsername, usernameFromDisplayName, usernameSeedFromEmail, validateUsername } from './username.ts';
 
 const scryptAsync = promisify(scrypt);
 
@@ -24,9 +26,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export interface AuthUser {
   id: number;
   email: string;
+  username: string;
   emailVerified: boolean;
   googleId: string | null;
   googleRefreshToken: string | null;
+  needsUsername: boolean;
+  hasPassword: boolean;
+  createdAt: string;
 }
 
 type Row = Record<string, unknown>;
@@ -112,23 +118,63 @@ function rowToUser(row: Row): AuthUser {
   return {
     id: row.id as number,
     email: row.email as string,
+    username: String(row.username ?? ''),
     emailVerified: Number(row.email_verified) === 1,
     googleId: (row.google_id as string | null) ?? null,
     googleRefreshToken: (row.google_refresh_token as string | null) ?? null,
+    needsUsername: Number(row.needs_username) === 1,
+    hasPassword: Boolean(String(row.password_hash ?? '')),
+    createdAt: String(row.created_at ?? ''),
   };
 }
 
-const USER_COLS = 'id, email, email_verified, google_id, google_refresh_token, password_hash';
+const USER_COLS =
+  'id, email, username, email_verified, google_id, google_refresh_token, password_hash, needs_username, created_at';
 
-export function createUser(email: string, passwordHash: string, extras: { verified?: boolean; googleId?: string } = {}): AuthUser {
+function usernameTaken(username: string, exceptUserId?: number): boolean {
+  const row = db.prepare('SELECT id FROM users WHERE username = ?').get(username) as Row | undefined;
+  if (!row) return false;
+  return exceptUserId == null || Number(row.id) !== exceptUserId;
+}
+
+export function allocateUsername(seed: string, exceptUserId?: number): string {
+  let base = normalizeUsername(seed);
+  if (validateUsername(base)) base = usernameSeedFromEmail(`${base || 'user'}@prospy.local`);
+  let candidate = base.slice(0, 24);
+  let n = 0;
+  while (usernameTaken(candidate, exceptUserId) || validateUsername(candidate)) {
+    n += 1;
+    const suffix = String(n);
+    candidate = `${base.slice(0, Math.max(1, 24 - suffix.length))}${suffix}`;
+  }
+  return candidate;
+}
+
+export function createUser(
+  email: string,
+  passwordHash: string,
+  extras: { verified?: boolean; googleId?: string; username?: string; needsUsername?: boolean } = {},
+): AuthUser {
+  const username = extras.username ? normalizeUsername(extras.username) : allocateUsername(usernameSeedFromEmail(email));
   const info = db
     .prepare(
-      `INSERT INTO users (email, password_hash, created_at, email_verified, google_id)
-       VALUES (?,?,?,?,?)`,
+      `INSERT INTO users (email, username, password_hash, created_at, email_verified, google_id, needs_username)
+       VALUES (?,?,?,?,?,?,?)`,
     )
-    .run(email, passwordHash, new Date().toISOString(), extras.verified ? 1 : 0, extras.googleId ?? null);
+    .run(
+      email,
+      username,
+      passwordHash,
+      new Date().toISOString(),
+      extras.verified ? 1 : 0,
+      extras.googleId ?? null,
+      extras.needsUsername ? 1 : 0,
+    );
   const id = Number(info.lastInsertRowid);
   claimOrphanData(id);
+  const workspaceId = ensurePersonalWorkspace(id);
+  db.prepare('UPDATE leads SET workspace_id = ? WHERE user_id = ? AND workspace_id = 0').run(workspaceId, id);
+  db.prepare('UPDATE searches SET workspace_id = ? WHERE user_id = ? AND workspace_id = 0').run(workspaceId, id);
   return findUserById(id)!;
 }
 
@@ -148,6 +194,20 @@ export function findUserByEmail(email: string): (AuthUser & { passwordHash: stri
   const row = db.prepare(`SELECT ${USER_COLS} FROM users WHERE email = ?`).get(email) as Row | undefined;
   if (!row) return null;
   return { ...rowToUser(row), passwordHash: (row.password_hash as string) ?? '' };
+}
+
+export function findUserByUsername(usernameRaw: string): (AuthUser & { passwordHash: string }) | null {
+  const username = normalizeUsername(usernameRaw);
+  if (!username) return null;
+  const row = db.prepare(`SELECT ${USER_COLS} FROM users WHERE username = ?`).get(username) as Row | undefined;
+  if (!row) return null;
+  return { ...rowToUser(row), passwordHash: (row.password_hash as string) ?? '' };
+}
+
+export function findUserByLogin(identifierRaw: string): (AuthUser & { passwordHash: string }) | null {
+  const identifier = identifierRaw.trim();
+  if (identifier.includes('@')) return findUserByEmail(normalizeEmail(identifier));
+  return findUserByUsername(identifier);
 }
 
 function findUserByGoogleId(googleId: string): AuthUser | null {
@@ -189,7 +249,7 @@ export function userFromRequest(req: Request): AuthUser | null {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.email, u.email_verified, u.google_id, u.google_refresh_token, u.password_hash
+      `SELECT u.id, u.email, u.username, u.email_verified, u.google_id, u.google_refresh_token, u.password_hash, u.needs_username, u.created_at
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ?`,
     )
@@ -233,6 +293,11 @@ export function toPublicUser(user: AuthUser): PublicUser {
   return {
     id: user.id,
     email: user.email,
+    username: user.username,
+    avatarUrl: avatarUrl(user.id),
+    needsUsername: user.needsUsername,
+    hasPassword: user.hasPassword,
+    createdAt: user.createdAt,
     plan: active ? plan : null,
     subscriptionStatus: status,
     googleLinked: Boolean(user.googleId),
@@ -247,14 +312,14 @@ export function userHasAccess(user: AuthUser): boolean {
 }
 
 export function authMethods(): { google: boolean; mail: boolean } {
-  return { google: googleConfigured(), mail: mailConfigured() || process.env.NODE_ENV !== 'production' };
+  return { google: googleConfigured(), mail: mailConfigured() };
 }
 
 function issueDigits(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
-async function issueCode(email: string, purpose: MailPurpose, locale?: string, payload?: string): Promise<void> {
+async function issueCode(email: string, purpose: Exclude<MailPurpose, 'invite'>, locale?: string, payload?: string): Promise<void> {
   db.prepare('DELETE FROM email_codes WHERE email = ? AND purpose = ?').run(email, purpose);
   const code = issueDigits();
   const expires = new Date(Date.now() + CODE_MINUTES * 60 * 1000).toISOString();
@@ -293,17 +358,34 @@ export async function register(
   emailRaw: string,
   password: string,
   locale?: string,
+  usernameRaw?: string,
+  avatarDataUrl?: string,
 ): Promise<{ needsCode: true; purpose: 'verify' } | { error: string; status: number }> {
   const email = normalizeEmail(emailRaw);
   const invalid = validateCredentials(email, password);
   if (invalid) return { error: invalid, status: 400 };
+  const usernameError = validateUsername(usernameRaw ?? '');
+  if (usernameError) return { error: usernameError, status: 400 };
+  const username = normalizeUsername(usernameRaw ?? '');
 
   const existing = findUserByEmail(email);
   if (existing?.emailVerified) return { error: 'Un compte existe déjà avec cet e-mail.', status: 409 };
+  if (usernameTaken(username, existing?.id)) return { error: 'Ce pseudo est déjà pris.', status: 409 };
 
   const hash = await hashPassword(password);
-  if (existing) setPasswordHash(existing.id, hash);
-  else createUser(email, hash, { verified: false });
+  if (existing) {
+    setPasswordHash(existing.id, hash);
+    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, existing.id);
+  } else createUser(email, hash, { verified: false, username });
+
+  const user = findUserByEmail(email);
+  if (user && avatarDataUrl?.trim()) {
+    try {
+      saveAvatarDataUrl(user.id, avatarDataUrl);
+    } catch {
+      /* photo optionnelle : le compte se crée quand même */
+    }
+  }
 
   try {
     await issueCode(email, 'verify', locale);
@@ -314,23 +396,23 @@ export async function register(
 }
 
 export async function login(
-  emailRaw: string,
+  identifierRaw: string,
   password: string,
   locale?: string,
 ): Promise<
-  { user: AuthUser; token: string } | { needsCode: true; purpose: 'verify' } | { error: string; status: number }
+  | { user: AuthUser; token: string }
+  | { needsCode: true; purpose: 'verify'; email: string }
+  | { error: string; status: number }
 > {
-  const email = normalizeEmail(emailRaw);
-  const invalid = validateCredentials(email, password);
-  if (invalid) return { error: 'E-mail ou mot de passe incorrect.', status: 401 };
+  if (validatePassword(password)) return { error: 'Pseudo, e-mail ou mot de passe incorrect.', status: 401 };
 
-  const found = findUserByEmail(email);
+  const found = findUserByLogin(identifierRaw);
   if (!found || !found.passwordHash) {
     if (found?.googleId) return { error: 'Ce compte se connecte avec Google.', status: 400 };
-    return { error: 'E-mail ou mot de passe incorrect.', status: 401 };
+    return { error: 'Pseudo, e-mail ou mot de passe incorrect.', status: 401 };
   }
   if (!(await verifyPassword(password, found.passwordHash))) {
-    return { error: 'E-mail ou mot de passe incorrect.', status: 401 };
+    return { error: 'Pseudo, e-mail ou mot de passe incorrect.', status: 401 };
   }
 
   if (found.emailVerified) {
@@ -338,11 +420,11 @@ export async function login(
   }
 
   try {
-    await issueCode(email, 'verify', locale);
+    await issueCode(found.email, 'verify', locale);
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Impossible d’envoyer le code.', status: 503 };
   }
-  return { needsCode: true, purpose: 'verify' };
+  return { needsCode: true, purpose: 'verify', email: found.email };
 }
 
 export async function verifyEmailCode(
@@ -452,6 +534,13 @@ function safeNext(raw: string | undefined): string {
   return '/app';
 }
 
+function withAppEnter(path: string): string {
+  if (!path.startsWith('/app')) return path;
+  if (path.startsWith('/app/compte') || path.startsWith('/app/pseudo')) return path;
+  if (path.includes('enter=')) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}enter=1`;
+}
+
 export function startGoogle(req: Request, res: Response): void {
   if (!googleConfigured()) {
     res.status(503).json({ error: 'La connexion Google n’est pas configurée.' });
@@ -464,6 +553,113 @@ export function startGoogle(req: Request, res: Response): void {
     t: Date.now(),
   });
   res.redirect(googleAuthUrl(req, state));
+}
+
+async function applyGooglePhoto(userId: number, picture: string | null): Promise<void> {
+  if (!picture || hasAvatar(userId)) return;
+  try {
+    await saveAvatarFromUrl(userId, picture);
+  } catch {
+    /* photo Google optionnelle */
+  }
+}
+
+function pickGoogleUsername(name: string, email: string): { username: string; needsUsername: boolean } {
+  if (!name.trim()) {
+    return { username: allocateUsername(usernameSeedFromEmail(email)), needsUsername: true };
+  }
+  const preferred = usernameFromDisplayName(name);
+  if (!validateUsername(preferred) && !usernameTaken(preferred)) {
+    return { username: preferred, needsUsername: false };
+  }
+  return {
+    username: allocateUsername(preferred || usernameSeedFromEmail(email)),
+    needsUsername: true,
+  };
+}
+
+export function claimUsername(
+  user: AuthUser,
+  raw: string,
+): { user: AuthUser } | { error: string; status: number } {
+  const usernameError = validateUsername(raw);
+  if (usernameError) return { error: usernameError, status: 400 };
+  const username = normalizeUsername(raw);
+  if (usernameTaken(username, user.id)) return { error: 'Ce pseudo est déjà pris.', status: 409 };
+  db.prepare('UPDATE users SET username = ?, needs_username = 0 WHERE id = ?').run(username, user.id);
+  return { user: findUserById(user.id)! };
+}
+
+export async function updateProfile(
+  user: AuthUser,
+  body: {
+    username?: string;
+    password?: string;
+    currentPassword?: string;
+    avatar?: string | null;
+  },
+): Promise<{ user: AuthUser } | { error: string; status: number }> {
+  if (typeof body.username === 'string' && body.username.trim() && body.username !== user.username) {
+    const claimed = claimUsername(user, body.username);
+    if ('error' in claimed) return claimed;
+    user = claimed.user;
+  }
+
+  if (typeof body.password === 'string' && body.password.length > 0) {
+    const invalid = validatePassword(body.password);
+    if (invalid) return { error: invalid, status: 400 };
+    if (user.hasPassword) {
+      const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(user.id) as Row | undefined;
+      const hash = String(row?.password_hash ?? '');
+      if (!hash || !(await verifyPassword(body.currentPassword ?? '', hash))) {
+        return { error: 'Mot de passe actuel incorrect.', status: 401 };
+      }
+    }
+    setPasswordHash(user.id, await hashPassword(body.password));
+  }
+
+  if (body.avatar === null) {
+    clearAvatar(user.id);
+  } else if (typeof body.avatar === 'string' && body.avatar.trim()) {
+    try {
+      saveAvatarDataUrl(user.id, body.avatar);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Photo illisible.', status: 400 };
+    }
+  }
+
+  return { user: findUserById(user.id)! };
+}
+
+export function accountStats(userId: number): {
+  sessions: number;
+  searches: number;
+  leads: number;
+  signed: number;
+  memberSince: string;
+} {
+  const count = (sql: string) =>
+    Number((db.prepare(sql).get(userId) as Row | undefined)?.n ?? 0);
+  const created = db.prepare('SELECT created_at FROM users WHERE id = ?').get(userId) as Row | undefined;
+  return {
+    sessions: count('SELECT COUNT(*) AS n FROM workspace_members WHERE user_id = ?'),
+    searches: count(
+      `SELECT COUNT(*) AS n FROM searches s
+       JOIN workspace_members m ON m.workspace_id = s.workspace_id
+       WHERE m.user_id = ?`,
+    ),
+    leads: count(
+      `SELECT COUNT(*) AS n FROM leads l
+       JOIN workspace_members m ON m.workspace_id = l.workspace_id
+       WHERE m.user_id = ?`,
+    ),
+    signed: count(
+      `SELECT COUNT(*) AS n FROM leads l
+       JOIN workspace_members m ON m.workspace_id = l.workspace_id
+       WHERE m.user_id = ? AND l.status = 'termine'`,
+    ),
+    memberSince: String(created?.created_at ?? ''),
+  };
 }
 
 export async function finishGoogle(req: Request, res: Response): Promise<void> {
@@ -492,6 +688,7 @@ export async function finishGoogle(req: Request, res: Response): Promise<void> {
       return fail('Ce compte Google est déjà lié à un autre utilisateur.');
     }
     saveGoogle(sessionUser.id, profile);
+    await applyGooglePhoto(sessionUser.id, profile.picture);
     res.redirect(`${appUrl}${state.next}`);
     return;
   }
@@ -499,15 +696,24 @@ export async function finishGoogle(req: Request, res: Response): Promise<void> {
   let user = findUserByGoogleId(profile.googleId) ?? findUserByEmail(profile.email);
   if (user) {
     saveGoogle(user.id, profile);
+    await applyGooglePhoto(user.id, profile.picture);
     user = findUserById(user.id);
   } else {
-    user = createUser(profile.email, '', { verified: true, googleId: profile.googleId });
+    const picked = pickGoogleUsername(profile.name, profile.email);
+    user = createUser(profile.email, '', {
+      verified: true,
+      googleId: profile.googleId,
+      username: picked.username,
+      needsUsername: picked.needsUsername,
+    });
     saveGoogle(user.id, profile);
+    await applyGooglePhoto(user.id, profile.picture);
     user = findUserById(user.id);
   }
   if (!user) return fail('Impossible de créer le compte Google.');
   attachSession(req, res, createSession(user.id));
-  res.redirect(`${appUrl}${state.next}`);
+  const next = user.needsUsername ? '/app/pseudo' : withAppEnter(state.next);
+  res.redirect(`${appUrl}${next}`);
 }
 
 export function attachSession(req: Request, res: Response, token: string): void {

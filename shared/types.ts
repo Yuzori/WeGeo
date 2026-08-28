@@ -42,6 +42,12 @@ export interface Lead {
   /** Le métier recherché qui a fait remonter cette entreprise. */
   domain: string;
   status: LeadStatus;
+  /** Nom du dirigeant (SIRENE), s’il a pu être identifié. */
+  dirigeant: string | null;
+  /** Page publique (annuaire-entreprises) correspondant à la recherche SIRENE. */
+  dirigeantSource: string | null;
+  /** `found` / `missing` après lookup ; `null` si pas encore cherché. */
+  dirigeantStatus: 'pending' | 'found' | 'missing' | null;
   /** Notes libres saisies pendant l'appel. */
   notes: string | null;
   /** true si l'entreprise a déjà été vue lors d'une recherche précédente. */
@@ -54,6 +60,7 @@ export interface Lead {
 export interface SearchRecord {
   id: number;
   userId: number;
+  workspaceId: number;
   city: string;
   domains: string[];
   /** Options utilisées, conservées pour pouvoir relancer la recherche à l'identique. */
@@ -149,10 +156,30 @@ export type SubscriptionStatus =
 export interface PublicUser {
   id: number;
   email: string;
+  username: string;
+  avatarUrl: string | null;
+  needsUsername: boolean;
+  hasPassword: boolean;
+  createdAt: string;
   plan: PlanId | null;
   subscriptionStatus: SubscriptionStatus;
   googleLinked: boolean;
   canExportSheets: boolean;
+}
+
+export interface AccountStats {
+  sessions: number;
+  searches: number;
+  leads: number;
+  signed: number;
+  memberSince: string;
+}
+
+export interface PeopleMatch {
+  id: number;
+  username: string;
+  email: string;
+  avatarUrl: string | null;
 }
 
 export interface BillingPlan {
@@ -163,6 +190,8 @@ export interface BillingPlan {
   amountLabel: string;
   interval: 'month';
   features: string[];
+  /** Limites de l’offre, affichées sur le site. Pas encore appliquées dans l’outil. */
+  locked?: string[];
   highlighted?: boolean;
   cta: string;
   priceConfigured: boolean;
@@ -173,4 +202,34 @@ export interface BillingPublicConfig {
   publishableKey: string | null;
   configured: boolean;
   plans: BillingPlan[];
+}
+
+/** Espace de travail partagé (appelé « session » dans l’interface). */
+export interface WorkspaceMember {
+  id: number;
+  email: string;
+  username: string;
+  role: 'owner' | 'member';
+}
+
+export interface Workspace {
+  id: number;
+  name: string;
+  personal: boolean;
+  role: 'owner' | 'member';
+  memberCount: number;
+  leadCount: number;
+  searchCount: number;
+  createdAt: string;
+  members: WorkspaceMember[];
+}
+
+export interface WorkspaceInvite {
+  id: number;
+  workspaceId: number;
+  workspaceName: string;
+  fromEmail: string;
+  fromUsername: string;
+  email: string;
+  createdAt: string;
 }

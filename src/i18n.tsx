@@ -1,4 +1,6 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
+import { morphLangBoxes, snapshotLangBoxes } from './lib/langMorph';
 
 export type Locale = 'fr' | 'en';
 
@@ -14,6 +16,8 @@ const copy = {
       pricing: 'Tarifs',
       login: 'Connexion',
       start: 'Commencer',
+      app: 'Ouvrir l’app',
+      account: 'Compte',
       lang: 'Langue',
       menu: 'Menu',
       close: 'Fermer',
@@ -36,7 +40,7 @@ const copy = {
       {
         k: '02',
         t: 'La méthode',
-        d: 'Ville + métiers. Prospy ouvre chaque fiche, classe le web, récupère téléphone et adresse.',
+        d: 'Ville + métiers. Prospy ouvre chaque fiche, classe le web, récupère téléphone, adresse et dirigeant.',
       },
       {
         k: '03',
@@ -109,13 +113,17 @@ const copy = {
           text: 'Cookie SameSite=Lax. Mots de passe dérivés avec scrypt.',
         },
       ],
+      googleTitle: 'Pourquoi Prospy demande un compte Google',
+      googleText:
+        'La connexion Google sert à ouvrir votre compte Prospy (e-mail et nom). L’accès à Google Sheets sert uniquement à créer un tableur de vos relevés quand vous cliquez sur exporter. Prospy ne lit pas vos autres fichiers, n’envoie pas d’e-mails en votre nom, et n’utilise pas ces données pour de la publicité.',
+      googlePrivacy: 'Politique de confidentialité',
     },
     pricing: {
       chip: 'tarifs',
       h2: 'Un abonnement, un outil.',
-      lead: 'Les montants affichés viennent du serveur. Le montant facturé est toujours celui de Stripe.',
+      lead: 'Chaque offre enlève ou débloque des plafonds (relevés, réglages, équipe, nom du dirigeant). Les prix ci-dessous sont ceux prévus. Stripe n’est pas encore branché : rien n’est limité dans l’outil pour le moment.',
       month: 'par mois',
-      stripeOff: 'Le paiement embarqué s’active lorsque les variables Stripe sont renseignées sur le serveur.',
+      stripeOff: 'Le paiement Stripe viendra ensuite. Les croix décrivent l’offre, elles ne sont pas encore appliquées.',
     },
     cta: {
       h2: 'Passez du balayage Maps à la liste d’appels.',
@@ -133,16 +141,22 @@ const copy = {
       notClosed: 'Non conclu',
       score: 'feu de potentiel',
       export: 'export · csv / excel',
-      mapHint: 'Lyon · 47 points',
+      mapHint: '{city} · 47 points',
       name: 'Nom',
       phone: 'Tél',
       scoreCol: 'Score',
+      owner: 'Dirigeant',
+      ownerMissing: 'Dirigeant non trouvé',
+      source: 'Source',
     },
     footer: {
       blurb: 'Relevé de commerces locaux sans site web. Données par compte, paiements par Stripe.',
       product: 'produit',
       account: 'compte',
       look: 'apparence',
+      legal: 'légal',
+      terms: 'conditions',
+      privacy: 'confidentialité',
       copy: '© 2026 Prospy. Tous droits réservés.',
     },
     mascot: {
@@ -151,7 +165,7 @@ const copy = {
       product: 'Une ville, des métiers : une liste d’appels.',
       features: 'Relevé, pipeline, appels, export. Rien d’autre.',
       trust: 'Tes fiches restent sur ton compte. Point.',
-      pricing: 'Le montant affiché, c’est celui de Stripe.',
+      pricing: 'Starter bride le relevé. Pro débloque le dirigeant. Agence, plus de plafond.',
       click: [
         'On lance un relevé ?',
         'Je ne retiens que les sans-site.',
@@ -169,15 +183,32 @@ const copy = {
         launch: 'Tu lances. Je ne garde que les commerces sans site.',
         results: 'Les fiches arrivent ici. L’étoile, c’est à appeler.',
         pipeline: 'À trier, favoris, signés. Ton pipeline est là.',
+        invite: 'Ici tu invites un associé : pseudo ou e-mail, puis la flèche.',
       },
     },
     auth: {
       loginTitle: 'Connexion',
       registerTitle: 'Créer un compte',
-      loginLead: 'E-mail et mot de passe suffisent. Google ouvre aussi l’export Sheets.',
-      registerLead: 'Un compte isole vos fiches. Un code arrive par e-mail avant d’ouvrir l’outil.',
+      loginLead: 'Pseudo ou e-mail, plus le mot de passe. Google ouvre aussi l’export Sheets.',
+      registerLead: 'E-mail, pseudo et mot de passe. Un code arrive par e-mail avant d’ouvrir l’outil.',
       email: 'e-mail',
+      username: 'pseudo',
+      photo: 'photo de profil (optionnel)',
+      photoHint: 'Sinon on affichera l’initiale de votre pseudo.',
+      photoChoose: 'Choisir une photo',
+      photoRemove: 'Retirer',
+      identifier: 'pseudo ou e-mail',
       password: 'mot de passe',
+      showPassword: 'Afficher le mot de passe',
+      hidePassword: 'Masquer le mot de passe',
+      strengthWeak: 'faible',
+      strengthFair: 'moyen',
+      strengthGood: 'solide',
+      strengthStrong: 'fort',
+      termsPrefix: 'En continuant, vous acceptez les',
+      terms: 'conditions d’utilisation',
+      termsAnd: 'et la',
+      privacy: 'politique de confidentialité',
       submitLogin: 'Se connecter',
       submitRegister: 'Créer le compte',
       wait: 'Un instant…',
@@ -203,6 +234,69 @@ const copy = {
       resent: 'Un nouveau code a été envoyé.',
       back: 'Retour',
     },
+    settings: {
+      docTitle: 'Compte — Prospy',
+      kicker: 'votre compte',
+      title: 'Réglages',
+      lead: 'Photo, pseudo, langue, apparence. Ce qui vous identifie dans les sessions partagées.',
+      back: 'Retour',
+      backHome: 'Retour à l’accueil',
+      backSessions: 'Retour aux sessions',
+      backSession: 'Retour au projet',
+      identity: 'Identité',
+      changePhoto: 'Changer la photo',
+      useInitial: 'Utiliser l’initiale',
+      username: 'pseudo',
+      email: 'e-mail',
+      currentPassword: 'mot de passe actuel',
+      newPassword: 'nouveau mot de passe',
+      addPassword: 'ajouter un mot de passe',
+      passwordKeep: 'Laisser vide pour ne pas changer',
+      passwordHint: 'Au moins 8 caractères',
+      save: 'Enregistrer',
+      saved: 'Profil enregistré.',
+      saveFail: 'Enregistrement impossible.',
+      photoUpdated: 'Photo mise à jour.',
+      photoFail: 'Photo illisible.',
+      photoRemoved: 'Photo retirée : l’initiale du pseudo s’affiche.',
+      photoRemoveFail: 'Impossible de retirer la photo.',
+      prefs: 'Préférences',
+      appearance: 'Apparence',
+      appearanceHint: 'Jour ou nuit, sur cet appareil.',
+      language: 'Langue',
+      languageHint: 'Landing, e-mails et toute l’application.',
+      google: 'Google',
+      googleLinkedSheets: 'Compte lié. L’export Sheets est prêt.',
+      googleLinkedRelink: 'Compte lié. Reliez-le à nouveau pour autoriser Sheets.',
+      googleHint: 'Liez Google pour vous connecter plus vite et copier un tableur dans Sheets.',
+      googleLink: 'Lier Google',
+      billing: 'Abonnement',
+      planActive: 'actif',
+      planNone: 'aucun abonnement',
+      memberSince: 'Membre depuis {date}',
+      manageBilling: 'Gérer l’abonnement',
+      shortcuts: 'Raccourcis',
+      shortcutPalette: 'Palette de commandes',
+      shortcutEsc: 'Fermer un panneau ou le guide',
+      shortcutCtrlK: 'Ctrl K',
+      shortcutEscKey: 'Échap',
+      statsSessions: 'Sessions',
+      statsSearches: 'Relevés',
+      statsLeads: 'Fiches',
+      statsSigned: 'Signés',
+    },
+    chrome: {
+      logout: 'Se déconnecter',
+      logoutAsk: 'Se déconnecter ?',
+      logoutHint: 'Vous pourrez vous reconnecter à tout moment.',
+      logoutBody: 'Fermer la session sur cet appareil ? Vos recherches et vos fiches restent enregistrées.',
+      logoutConfirm: 'Se déconnecter',
+      cancel: 'Annuler',
+      day: 'jour',
+      night: 'nuit',
+      toDay: 'Passer en mode jour',
+      toNight: 'Passer en mode nuit',
+    },
   },
   en: {
     title: 'Prospy — Find local businesses with no website',
@@ -213,6 +307,8 @@ const copy = {
       pricing: 'Pricing',
       login: 'Log in',
       start: 'Get started',
+      app: 'Open the app',
+      account: 'Account',
       lang: 'Language',
       menu: 'Menu',
       close: 'Close',
@@ -235,7 +331,7 @@ const copy = {
       {
         k: '02',
         t: 'The method',
-        d: 'City + trades. Prospy opens each listing, classifies the web, and pulls phone and address.',
+        d: 'City + trades. Prospy opens each listing, classifies the web, and pulls phone, address and owner name.',
       },
       {
         k: '03',
@@ -308,13 +404,17 @@ const copy = {
           text: 'SameSite=Lax cookie. Passwords derived with scrypt.',
         },
       ],
+      googleTitle: 'Why Prospy asks for a Google account',
+      googleText:
+        'Google sign-in is used to open your Prospy account (email and name). Google Sheets access is used only to create a spreadsheet of your surveys when you click export. Prospy does not read your other files, send email as you, or use this data for ads.',
+      googlePrivacy: 'Privacy policy',
     },
     pricing: {
       chip: 'pricing',
       h2: 'One subscription, one tool.',
-      lead: 'Amounts come from the server. The billed amount is always Stripe’s.',
+      lead: 'Each plan caps or unlocks survey volume, settings, team invites, and owner names. Prices below are the intended ones. Stripe is not wired yet, so nothing is limited in the tool for now.',
       month: 'per month',
-      stripeOff: 'Embedded checkout turns on when Stripe variables are set on the server.',
+      stripeOff: 'Stripe checkout comes later. The crossed items describe the offer; they are not enforced yet.',
     },
     cta: {
       h2: 'Go from scanning Maps to a call list.',
@@ -332,16 +432,22 @@ const copy = {
       notClosed: 'Not closed',
       score: 'potential score',
       export: 'export · csv / excel',
-      mapHint: 'Lyon · 47 pins',
+      mapHint: '{city} · 47 pins',
       name: 'Name',
       phone: 'Phone',
       scoreCol: 'Score',
+      owner: 'Owner',
+      ownerMissing: 'Owner not found',
+      source: 'Source',
     },
     footer: {
       blurb: 'Survey of local businesses with no website. Data per account, payments via Stripe.',
       product: 'product',
       account: 'account',
       look: 'appearance',
+      legal: 'legal',
+      terms: 'terms',
+      privacy: 'privacy',
       copy: '© 2026 Prospy. All rights reserved.',
     },
     mascot: {
@@ -350,7 +456,7 @@ const copy = {
       product: 'A city, some trades: a call list.',
       features: 'Survey, pipeline, calls, export. That’s it.',
       trust: 'Your cards stay on your account. Full stop.',
-      pricing: 'The price on screen is the Stripe price.',
+      pricing: 'Starter caps the survey. Pro unlocks the owner name. Agency lifts the ceiling.',
       click: [
         'Run a survey?',
         'I only keep shops with no site.',
@@ -368,15 +474,32 @@ const copy = {
         launch: 'You start it. I only keep shops with no website.',
         results: 'Cards land here. Star them to call later.',
         pipeline: 'Inbox, favorites, signed. Your pipeline is here.',
+        invite: 'Invite a teammate here: username or email, then the arrow.',
       },
     },
     auth: {
       loginTitle: 'Log in',
       registerTitle: 'Create an account',
-      loginLead: 'Email and password are enough. Google also unlocks Sheets export.',
-      registerLead: 'An account isolates your cards. A code arrives by email before the tool opens.',
+      loginLead: 'Username or email, plus your password. Google also unlocks Sheets export.',
+      registerLead: 'Email, username and password. A code arrives by email before the tool opens.',
       email: 'email',
+      username: 'username',
+      photo: 'profile photo (optional)',
+      photoHint: 'Otherwise we show the first letter of your username.',
+      photoChoose: 'Choose a photo',
+      photoRemove: 'Remove',
+      identifier: 'username or email',
       password: 'password',
+      showPassword: 'Show password',
+      hidePassword: 'Hide password',
+      strengthWeak: 'weak',
+      strengthFair: 'fair',
+      strengthGood: 'solid',
+      strengthStrong: 'strong',
+      termsPrefix: 'By continuing you agree to the',
+      terms: 'terms of use',
+      termsAnd: 'and the',
+      privacy: 'privacy policy',
       submitLogin: 'Log in',
       submitRegister: 'Create account',
       wait: 'One moment…',
@@ -402,6 +525,69 @@ const copy = {
       resent: 'A new code was sent.',
       back: 'Back',
     },
+    settings: {
+      docTitle: 'Account — Prospy',
+      kicker: 'your account',
+      title: 'Settings',
+      lead: 'Photo, username, language, appearance. How you show up in shared sessions.',
+      back: 'Back',
+      backHome: 'Back to home',
+      backSessions: 'Back to sessions',
+      backSession: 'Back to the project',
+      identity: 'Identity',
+      changePhoto: 'Change photo',
+      useInitial: 'Use initial',
+      username: 'username',
+      email: 'email',
+      currentPassword: 'current password',
+      newPassword: 'new password',
+      addPassword: 'add a password',
+      passwordKeep: 'Leave blank to keep it',
+      passwordHint: 'At least 8 characters',
+      save: 'Save',
+      saved: 'Profile saved.',
+      saveFail: 'Could not save.',
+      photoUpdated: 'Photo updated.',
+      photoFail: 'Could not read that photo.',
+      photoRemoved: 'Photo removed: your username initial is shown.',
+      photoRemoveFail: 'Could not remove the photo.',
+      prefs: 'Preferences',
+      appearance: 'Appearance',
+      appearanceHint: 'Day or night, on this device.',
+      language: 'Language',
+      languageHint: 'Landing, emails and the whole app.',
+      google: 'Google',
+      googleLinkedSheets: 'Account linked. Sheets export is ready.',
+      googleLinkedRelink: 'Account linked. Link it again to allow Sheets.',
+      googleHint: 'Link Google to sign in faster and copy a sheet into Sheets.',
+      googleLink: 'Link Google',
+      billing: 'Billing',
+      planActive: 'active',
+      planNone: 'no subscription',
+      memberSince: 'Member since {date}',
+      manageBilling: 'Manage billing',
+      shortcuts: 'Shortcuts',
+      shortcutPalette: 'Command palette',
+      shortcutEsc: 'Close a panel or the guide',
+      shortcutCtrlK: 'Ctrl K',
+      shortcutEscKey: 'Esc',
+      statsSessions: 'Sessions',
+      statsSearches: 'Surveys',
+      statsLeads: 'Cards',
+      statsSigned: 'Signed',
+    },
+    chrome: {
+      logout: 'Log out',
+      logoutAsk: 'Log out?',
+      logoutHint: 'You can sign back in at any time.',
+      logoutBody: 'Close the session on this device? Your surveys and cards stay saved.',
+      logoutConfirm: 'Log out',
+      cancel: 'Cancel',
+      day: 'day',
+      night: 'night',
+      toDay: 'Switch to day mode',
+      toNight: 'Switch to night mode',
+    },
   },
 } as const;
 
@@ -413,6 +599,17 @@ const LocaleContext = createContext<{
   m: Copy;
 } | null>(null);
 
+function browserLocale(): Locale {
+  const tags = [navigator.language, ...(navigator.languages ?? [])]
+    .filter(Boolean)
+    .map((tag) => tag.toLowerCase());
+  for (const tag of tags) {
+    if (tag === 'fr' || tag.startsWith('fr-')) return 'fr';
+    if (tag === 'en' || tag.startsWith('en-')) return 'en';
+  }
+  return 'fr';
+}
+
 function readLocale(): Locale {
   try {
     const stored = localStorage.getItem(KEY);
@@ -420,20 +617,51 @@ function readLocale(): Locale {
   } catch {
     /* ignore */
   }
-  return navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr';
+  return browserLocale();
 }
 
 export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(() => (typeof document === 'undefined' ? 'fr' : readLocale()));
+  const swapTimer = useRef(0);
 
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
 
+  useEffect(() => () => window.clearTimeout(swapTimer.current), []);
+
   const setLocale = (next: Locale) => {
-    setLocaleState(next);
-    localStorage.setItem(KEY, next);
-    document.documentElement.lang = next;
+    if (next === locale) return;
+    const root = document.documentElement;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const apply = () => {
+      setLocaleState(next);
+      localStorage.setItem(KEY, next);
+      root.lang = next;
+    };
+    window.clearTimeout(swapTimer.current);
+    if (reduced) {
+      root.classList.remove('is-lang-out', 'is-lang-in');
+      apply();
+      return;
+    }
+    const shots = snapshotLangBoxes();
+    root.classList.remove('is-lang-in');
+    root.classList.add('is-lang-out');
+    swapTimer.current = window.setTimeout(() => {
+      try {
+        flushSync(apply);
+      } catch {
+        apply();
+      }
+      requestAnimationFrame(() => {
+        root.classList.remove('is-lang-out', 'is-lang-in');
+        void root.offsetWidth;
+        root.classList.add('is-lang-in');
+        morphLangBoxes(shots);
+        swapTimer.current = window.setTimeout(() => root.classList.remove('is-lang-in'), 780);
+      });
+    }, 240);
   };
 
   return <LocaleContext.Provider value={{ locale, setLocale, m: copy[locale] }}>{children}</LocaleContext.Provider>;

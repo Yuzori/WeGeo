@@ -17,11 +17,39 @@ const AuthContext = createContext<AuthValue>({
   setUser: () => {},
 });
 
+const USER_CACHE = 'prospy.user';
+
+function readCachedUser(): PublicUser | null {
+  try {
+    const raw = localStorage.getItem(USER_CACHE);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PublicUser;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'number') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedUser(user: PublicUser | null) {
+  try {
+    if (user) localStorage.setItem(USER_CACHE, JSON.stringify(user));
+    else localStorage.removeItem(USER_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<PublicUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUserState] = useState<PublicUser | null>(() => readCachedUser());
+  const [loading, setLoading] = useState(() => !readCachedUser());
+
+  const setUser = useCallback((next: PublicUser | null) => {
+    setUserState(next);
+    writeCachedUser(next);
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -32,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setUser]);
 
   useEffect(() => {
     void refresh();
@@ -50,6 +78,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (!user) {
     return <Navigate to="/connexion" replace state={{ from: location.pathname }} />;
+  }
+  if (user.needsUsername && location.pathname !== '/app/pseudo') {
+    return <Navigate to="/app/pseudo" replace />;
   }
   return <>{children}</>;
 }

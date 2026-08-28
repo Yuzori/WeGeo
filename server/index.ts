@@ -7,11 +7,14 @@ import { DEFAULT_OPTIONS, LEAD_STATUSES, type LeadStatus, type SearchOptions } f
 import * as db from './db.ts';
 import * as auth from './auth.ts';
 import * as billing from './billing.ts';
+import * as workspaces from './workspaces.ts';
+import { readAvatar } from './avatars.ts';
 import { safeFileName, toCsv, toRows, toTsv, toXlsx } from './export.ts';
 import { createGoogleSheet, googleAccessToken } from './google.ts';
 import { activeRunIds, cancelRun, getRun, resumeSearch, startSearch } from './search-runner.ts';
 import { closeBrowser, warmUp } from './scraper/maps.ts';
 import { geocodeCity } from './scraper/geo.ts';
+import { locateRequest } from './locate.ts';
 import { rateLimit, sameOriginMutations, securityHeaders } from './security.ts';
 
 const PORT = Number(process.env.PORT ?? 4319);
@@ -41,7 +44,7 @@ app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), asyn
   res.json({ received: true });
 });
 
-app.use(express.json({ limit: '64kb' }));
+app.use(express.json({ limit: '512kb' }));
 app.use(sameOriginMutations);
 
 db.markStaleSearchesCancelled();
@@ -68,6 +71,16 @@ function parseOptions(raw: unknown): SearchOptions {
   };
 }
 
+/* -------------------------------------------------------------- géolocalisation IP */
+
+api.get('/locate', rateLimit(40, 60 * 1000), async (req, res) => {
+  try {
+    res.json(await locateRequest(req));
+  } catch {
+    res.json(null);
+  }
+});
+
 /* ---------------------------------------------------------------- authentification */
 
 api.get('/auth/methods', (_req, res) => {
@@ -79,6 +92,8 @@ api.post('/auth/register', rateLimit(8, 60 * 60 * 1000), async (req, res) => {
     String(req.body?.email ?? ''),
     String(req.body?.password ?? ''),
     String(req.body?.locale ?? 'fr'),
+    String(req.body?.username ?? ''),
+    typeof req.body?.avatar === 'string' ? req.body.avatar : undefined,
   );
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.status(201).json(result);
@@ -86,7 +101,7 @@ api.post('/auth/register', rateLimit(8, 60 * 60 * 1000), async (req, res) => {
 
 api.post('/auth/login', rateLimit(12, 15 * 60 * 1000), async (req, res) => {
   const result = await auth.login(
-    String(req.body?.email ?? ''),
+    String(req.body?.identifier ?? req.body?.email ?? ''),
     String(req.body?.password ?? ''),
     String(req.body?.locale ?? 'fr'),
   );
@@ -154,6 +169,138 @@ api.get('/auth/me', (req, res) => {
   res.json({ user: user ? auth.toPublicUser(user) : null });
 });
 
+api.patch('/auth/profile', auth.requireUser, rateLimit(20, 15 * 60 * 1000), async (req, res) => {
+  const result = await auth.updateProfile(auth.currentUser(res), {
+    username: typeof req.body?.username === 'string' ? req.body.username : undefined,
+    password: typeof req.body?.password === 'string' ? req.body.password : undefined,
+    currentPassword: typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : undefined,
+    avatar: req.body?.avatar === null ? null : typeof req.body?.avatar === 'string' ? req.body.avatar : undefined,
+  });
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json({ user: auth.toPublicUser(result.user) });
+});
+
+api.post('/auth/username', auth.requireUser, rateLimit(20, 15 * 60 * 1000), (req, res) => {
+  const result = auth.claimUsername(auth.currentUser(res), String(req.body?.username ?? ''));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json({ user: auth.toPublicUser(result.user) });
+});
+
+api.get('/auth/stats', auth.requireUser, (_req, res) => {
+  res.json(auth.accountStats(auth.currentUser(res).id));
+});
+
+api.get('/avatars/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(404).end();
+  const buffer = readAvatar(id);
+  if (!buffer) return res.status(404).end();
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.end(buffer);
+});
+
+/* ----------------------------------------------------------------- sessions */
+
+api.get('/workspaces', auth.requireUser, (_req, res) => {
+  res.json({
+    workspaces: workspaces.listForUser(auth.currentUser(res)),
+    invites: workspaces.listInvites(auth.currentUser(res)),
+  });
+});
+
+api.post('/workspaces', auth.requireUser, rateLimit(20, 60 * 60 * 1000), (req, res) => {
+  const result = workspaces.createWorkspace(auth.currentUser(res), String(req.body?.name ?? ''));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.status(201).json({ workspace: result });
+});
+
+api.get('/workspaces/invites', auth.requireUser, (_req, res) => {
+  res.json({ invites: workspaces.listInvites(auth.currentUser(res)) });
+});
+
+api.post('/workspaces/lookup', auth.requireUser, rateLimit(30, 15 * 60 * 1000), (req, res) => {
+  const result = workspaces.lookupPerson(String(req.body?.query ?? req.body?.email ?? ''));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+api.get('/workspaces/people', auth.requireUser, rateLimit(60, 60 * 1000), (req, res) => {
+  res.json({
+    people: workspaces.searchPeople(auth.currentUser(res), String(req.query.q ?? '')),
+  });
+});
+
+api.post('/workspaces/invites/:id/accept', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.acceptInvite(id, auth.currentUser(res));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json({ workspace: result });
+});
+
+api.post('/workspaces/invites/:id/decline', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.declineInvite(id, auth.currentUser(res));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+api.get('/workspaces/:id', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const workspace = workspaces.getForUser(id, auth.currentUser(res));
+  if (!workspace) return res.status(404).json({ error: 'Session introuvable.' });
+  res.json({ workspace });
+});
+
+api.patch('/workspaces/:id', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.renameWorkspace(id, auth.currentUser(res), String(req.body?.name ?? ''));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json({ workspace: result });
+});
+
+api.delete('/workspaces/:id', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.deleteWorkspace(id, auth.currentUser(res));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+api.post('/workspaces/:id/leave', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.leaveWorkspace(id, auth.currentUser(res));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
+api.post('/workspaces/:id/invites', auth.requireUser, rateLimit(30, 60 * 60 * 1000), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = await workspaces.invite(
+    id,
+    auth.currentUser(res),
+    String(req.body?.query ?? req.body?.email ?? ''),
+    String(req.body?.locale ?? 'fr'),
+  );
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.status(201).json(result);
+});
+
+api.delete('/workspaces/:id/members/:userId', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  const memberId = parseId(req.params.userId);
+  if (!id || !memberId) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const result = workspaces.removeMember(id, auth.currentUser(res), memberId);
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json({ workspace: result });
+});
+
 /* -------------------------------------------------------------------- billing */
 
 api.get('/billing/config', (_req, res) => {
@@ -181,7 +328,7 @@ api.post('/billing/confirm', auth.requireUser, rateLimit(20, 60 * 1000), async (
 
 /* ------------------------------------------------------------- recherches */
 
-api.post('/searches', auth.requireUser, rateLimit(8, 60 * 1000), (req: Request, res: Response) => {
+api.post('/searches', auth.requireUser, workspaces.requireWorkspace, rateLimit(8, 60 * 1000), (req: Request, res: Response) => {
   const user = auth.currentUser(res);
   if (!auth.userHasAccess(user)) {
     return res.status(402).json({ error: 'Un abonnement actif est requis pour lancer une recherche.' });
@@ -201,15 +348,15 @@ api.post('/searches', auth.requireUser, rateLimit(8, 60 * 1000), (req: Request, 
     return res.status(409).json({ error: 'Une recherche est déjà en cours. Attendez la fin ou arrêtez-la.' });
   }
 
-  const searchId = startSearch({ city, domains, options: parseOptions(req.body?.options) }, user.id);
+  const searchId = startSearch({ city, domains, options: parseOptions(req.body?.options) }, workspaces.currentWorkspaceId(res), user.id);
   res.status(201).json({ searchId });
 });
 
 /** Flux d'évènements en direct pendant le scraping. */
-api.get('/searches/:id/stream', auth.requireUser, (req: Request, res: Response) => {
+api.get('/searches/:id/stream', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  const search = db.getSearch(id, auth.currentUser(res).id);
+  const search = db.getSearch(id, workspaces.currentWorkspaceId(res));
   if (!search) return res.status(404).json({ error: 'Recherche inconnue ou expirée.' });
 
   const run = getRun(id);
@@ -236,16 +383,16 @@ api.get('/searches/:id/stream', auth.requireUser, (req: Request, res: Response) 
   });
 });
 
-api.post('/searches/:id/cancel', auth.requireUser, (req: Request, res: Response) => {
+api.post('/searches/:id/cancel', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  if (!db.getSearch(id, auth.currentUser(res).id)) return res.status(404).json({ error: 'Recherche inconnue.' });
+  if (!db.getSearch(id, workspaces.currentWorkspaceId(res))) return res.status(404).json({ error: 'Recherche inconnue.' });
   const ok = cancelRun(id);
   res.json({ cancelled: ok });
 });
 
 /** Repart d'une recherche arrêtée, en sautant les métiers déjà parcourus. */
-api.post('/searches/:id/resume', auth.requireUser, (req: Request, res: Response) => {
+api.post('/searches/:id/resume', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const user = auth.currentUser(res);
   if (!auth.userHasAccess(user)) {
     return res.status(402).json({ error: 'Un abonnement actif est requis pour lancer une recherche.' });
@@ -256,40 +403,41 @@ api.post('/searches/:id/resume', auth.requireUser, (req: Request, res: Response)
 
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  if (!resumeSearch(id, user.id)) {
+  if (!resumeSearch(id, workspaces.currentWorkspaceId(res))) {
     return res.status(409).json({ error: 'Cette recherche ne peut pas être reprise : elle est déjà complète.' });
   }
   res.json({ searchId: id });
 });
 
-api.get('/searches', auth.requireUser, (_req: Request, res: Response) => {
-  res.json(db.listSearches(auth.currentUser(res).id, 200));
+api.get('/searches', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+  res.json(db.listSearches(workspaces.currentWorkspaceId(res), 200));
 });
 
-api.get('/searches/active', auth.requireUser, (_req: Request, res: Response) => {
-  res.json({ ids: activeRunIds() });
+api.get('/searches/active', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+  const workspaceId = workspaces.currentWorkspaceId(res);
+  res.json({ ids: activeRunIds().filter((id) => db.getSearch(id)?.workspaceId === workspaceId) });
 });
 
-api.get('/searches/:id/leads', auth.requireUser, (req: Request, res: Response) => {
+api.get('/searches/:id/leads', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  const userId = auth.currentUser(res).id;
-  if (!db.getSearch(id, userId)) return res.status(404).json({ error: 'Recherche inconnue.' });
-  res.json(db.listLeads({ userId, searchId: id }));
+  const workspaceId = workspaces.currentWorkspaceId(res);
+  if (!db.getSearch(id, workspaceId)) return res.status(404).json({ error: 'Recherche inconnue.' });
+  res.json(db.listLeads({ workspaceId, searchId: id }));
 });
 
-api.get('/searches/:id', auth.requireUser, (req: Request, res: Response) => {
+api.get('/searches/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  const search = db.getSearch(id, auth.currentUser(res).id);
+  const search = db.getSearch(id, workspaces.currentWorkspaceId(res));
   if (!search) return res.status(404).json({ error: 'Recherche inconnue.' });
   res.json(search);
 });
 
-api.delete('/searches/:id', auth.requireUser, (req: Request, res: Response) => {
+api.delete('/searches/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  if (!db.deleteSearch(id, auth.currentUser(res).id)) {
+  if (!db.deleteSearch(id, workspaces.currentWorkspaceId(res))) {
     return res.status(404).json({ error: 'Recherche inconnue.' });
   }
   res.json({ ok: true });
@@ -297,12 +445,12 @@ api.delete('/searches/:id', auth.requireUser, (req: Request, res: Response) => {
 
 /* ---------------------------------------------------------------- prospects */
 
-function parseFilters(req: Request, userId: number): db.LeadFilters {
+function parseFilters(req: Request, workspaceId: number): db.LeadFilters {
   const status = req.query.status as string | undefined;
   const website = req.query.website as string | undefined;
   const query = typeof req.query.q === 'string' ? req.query.q.slice(0, 120) : undefined;
   return {
-    userId,
+    workspaceId,
     status: status && LEAD_STATUSES.includes(status as LeadStatus) ? (status as LeadStatus) : undefined,
     city: typeof req.query.city === 'string' ? req.query.city.slice(0, 120) : undefined,
     domain: typeof req.query.domain === 'string' ? req.query.domain.slice(0, 80) : undefined,
@@ -312,30 +460,30 @@ function parseFilters(req: Request, userId: number): db.LeadFilters {
   };
 }
 
-api.get('/leads', auth.requireUser, (req: Request, res: Response) => {
-  res.json(db.listLeads(parseFilters(req, auth.currentUser(res).id)));
+api.get('/leads', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+  res.json(db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res))));
 });
 
-api.patch('/leads/:id', auth.requireUser, (req: Request, res: Response) => {
+api.patch('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  const userId = auth.currentUser(res).id;
+  const workspaceId = workspaces.currentWorkspaceId(res);
   const { status, notes } = req.body ?? {};
 
-  if (typeof notes === 'string') db.setLeadNotes(id, notes.slice(0, 4000), userId);
+  if (typeof notes === 'string') db.setLeadNotes(id, notes.slice(0, 4000), workspaceId);
   if (typeof status === 'string') {
     if (!LEAD_STATUSES.includes(status as LeadStatus)) {
       return res.status(400).json({ error: 'Statut invalide.' });
     }
-    db.setLeadStatus(id, status as LeadStatus, userId);
+    db.setLeadStatus(id, status as LeadStatus, workspaceId);
   }
 
-  const lead = db.getLead(id, userId);
+  const lead = db.getLead(id, workspaceId);
   if (!lead) return res.status(404).json({ error: 'Prospect introuvable.' });
   res.json(lead);
 });
 
-api.post('/leads/bulk', auth.requireUser, (req: Request, res: Response) => {
+api.post('/leads/bulk', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.ids)
     ? (req.body.ids as unknown[])
         .map(Number)
@@ -343,19 +491,19 @@ api.post('/leads/bulk', auth.requireUser, (req: Request, res: Response) => {
         .slice(0, 200)
     : [];
   const action = String(req.body?.action ?? '');
-  const userId = auth.currentUser(res).id;
+  const workspaceId = workspaces.currentWorkspaceId(res);
 
-  if (action === 'delete') return res.json({ changed: db.deleteLeadsBulk(ids, userId) });
+  if (action === 'delete') return res.json({ changed: db.deleteLeadsBulk(ids, workspaceId) });
   if (LEAD_STATUSES.includes(action as LeadStatus)) {
-    return res.json({ changed: db.setLeadStatusBulk(ids, action as LeadStatus, userId) });
+    return res.json({ changed: db.setLeadStatusBulk(ids, action as LeadStatus, workspaceId) });
   }
   res.status(400).json({ error: 'Action inconnue.' });
 });
 
-api.delete('/leads/:id', auth.requireUser, (req: Request, res: Response) => {
+api.delete('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  if (!db.deleteLead(id, auth.currentUser(res).id)) {
+  if (!db.deleteLead(id, workspaces.currentWorkspaceId(res))) {
     return res.status(404).json({ error: 'Prospect introuvable.' });
   }
   res.json({ ok: true });
@@ -363,13 +511,13 @@ api.delete('/leads/:id', auth.requireUser, (req: Request, res: Response) => {
 
 /* -------------------------------------------------------------- métadonnées */
 
-api.get('/meta', auth.requireUser, (_req: Request, res: Response) => {
-  const userId = auth.currentUser(res).id;
+api.get('/meta', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+  const workspaceId = workspaces.currentWorkspaceId(res);
   res.json({
-    stats: db.stats(userId),
-    cities: db.knownCities(userId),
-    domains: db.knownDomains(userId),
-    activeSearches: activeRunIds(),
+    stats: db.stats(workspaceId),
+    cities: db.knownCities(workspaceId),
+    domains: db.knownDomains(workspaceId),
+    activeSearches: activeRunIds().filter((id) => db.getSearch(id)?.workspaceId === workspaceId),
   });
 });
 
@@ -381,9 +529,9 @@ api.get('/geocode', auth.requireUser, rateLimit(30, 60 * 1000), async (req: Requ
 
 /* ------------------------------------------------------------------ exports */
 
-api.get('/export/:format', auth.requireUser, async (req: Request, res: Response) => {
+api.get('/export/:format', auth.requireUser, workspaces.requireWorkspace, async (req: Request, res: Response) => {
   const format = req.params.format;
-  const leads = db.listLeads(parseFilters(req, auth.currentUser(res).id));
+  const leads = db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res)));
   const label = typeof req.query.status === 'string' ? req.query.status.slice(0, 40) : 'prospects';
   const stamp = new Date().toISOString().slice(0, 10);
 
@@ -410,12 +558,12 @@ api.get('/export/:format', auth.requireUser, async (req: Request, res: Response)
   res.status(400).json({ error: 'Format non pris en charge.' });
 });
 
-api.post('/export/sheets', auth.requireUser, rateLimit(8, 60 * 60 * 1000), async (req, res) => {
+api.post('/export/sheets', auth.requireUser, workspaces.requireWorkspace, rateLimit(8, 60 * 60 * 1000), async (req, res) => {
   const user = auth.currentUser(res);
   if (!user.googleRefreshToken) {
     return res.status(409).json({ error: 'Connectez Google pour envoyer le tableur dans Sheets.' });
   }
-  const leads = db.listLeads(parseFilters(req, user.id));
+  const leads = db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res)));
   if (!leads.length) return res.status(400).json({ error: 'Aucune ligne à exporter.' });
   const label = typeof req.query.status === 'string' ? req.query.status.slice(0, 40) : 'prospects';
   const stamp = new Date().toISOString().slice(0, 10);
@@ -437,13 +585,29 @@ app.use('/api', api);
 // En production, on sert l'interface compilée depuis le même serveur.
 const webDist = resolve(process.cwd(), 'dist', 'web');
 if (existsSync(webDist)) {
-  app.use(express.static(webDist));
-  app.get('*splat', (_req, res) => res.sendFile(resolve(webDist, 'index.html')));
+  app.use(
+    express.static(webDist, {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
+      },
+    }),
+  );
+  app.get('*splat', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.sendFile(resolve(webDist, 'index.html'));
+  });
 }
 
 const server = app.listen(PORT, () => {
   console.log(`Prospy API prête sur http://localhost:${PORT}`);
-  if (!existsSync(webDist)) console.log("Interface : lancez « npm run dev » puis ouvrez http://localhost:5173");
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Interface à jour en local : http://localhost:5173  (npm run dev)');
+    if (existsSync(webDist)) {
+      console.log('http://localhost:4319 sert dist/web (dernier npm run build), pas le live Vite.');
+    }
+  } else if (!existsSync(webDist)) {
+    console.log("Interface : lancez « npm run dev » puis ouvrez http://localhost:5173");
+  }
   if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
     console.warn('SESSION_SECRET manquant : définissez-le en production.');
   }

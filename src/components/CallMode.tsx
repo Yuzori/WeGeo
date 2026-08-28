@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../shared/types';
 import { TIER_COLORS, formatCoords, potential, tierLabel } from '../lib/lead';
+import { DirigeantLine } from './DirigeantLine';
 import { Tag, cx, useToast } from './ui';
 
 /** Une touche du clavier, dessinée comme telle. */
@@ -48,6 +49,7 @@ export function CallMode({
   const [draft, setDraft] = useState('');
   const [verdict, setVerdict] = useState<LeadStatus | null>(null);
   const [handled, setHandled] = useState(0);
+  const [, setStamp] = useState(0);
   const notes = useRef<HTMLTextAreaElement>(null);
 
   // La liste est figée à l'ouverture : classer une fiche ne doit pas la faire
@@ -55,6 +57,28 @@ export function CallMode({
   const queue = useRef(leads);
   const list = queue.current;
   const lead = list[index];
+
+  useEffect(() => {
+    let touched = false;
+    for (const updated of leads) {
+      const slot = queue.current.findIndex((row) => row.id === updated.id);
+      if (slot === -1) continue;
+      if (
+        updated.dirigeant !== queue.current[slot].dirigeant ||
+        updated.dirigeantSource !== queue.current[slot].dirigeantSource ||
+        updated.dirigeantStatus !== queue.current[slot].dirigeantStatus
+      ) {
+        queue.current[slot] = {
+          ...queue.current[slot],
+          dirigeant: updated.dirigeant,
+          dirigeantSource: updated.dirigeantSource,
+          dirigeantStatus: updated.dirigeantStatus,
+        };
+        if (slot === index) touched = true;
+      }
+    }
+    if (touched) setStamp((n) => n + 1);
+  }, [leads, index]);
 
   useEffect(() => {
     setDraft(lead?.notes ?? '');
@@ -131,11 +155,11 @@ export function CallMode({
   const telHref = `tel:${(lead.phone ?? '').replace(/\s/g, '')}`;
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-paper">
+    <div className="app-stage flex flex-col bg-paper">
       {/* Bandeau : progression dans la file d'appels. */}
-      <header className="flex items-center gap-4 border-b border-rule px-4 py-3">
-        <span className="legend">session d’appels</span>
-        <div className="flex flex-1 items-center gap-[3px]" aria-hidden>
+      <header className="flex items-center gap-2 border-b border-rule px-3 py-3 sm:gap-4 sm:px-4">
+        <span className="legend shrink-0">session d’appels</span>
+        <div className="flex min-w-0 flex-1 items-center gap-[3px]" aria-hidden>
           {list.map((l, i) => (
             <span
               key={l.id}
@@ -146,19 +170,19 @@ export function CallMode({
             />
           ))}
         </div>
-        <span className="legend tnum">
+        <span className="legend tnum shrink-0">
           {index + 1} / {list.length}
         </span>
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex items-center gap-1.5 rounded-md border border-rule px-2 py-1 text-xs font-medium transition hover:bg-card-2"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-rule px-2 py-1 text-xs font-medium transition hover:bg-card-2"
         >
-          <X className="size-3.5" /> Quitter <Key>Échap</Key>
+          <X className="size-3.5" /> <span className="hidden sm:inline">Quitter</span> <span className="hidden sm:inline"><Key>Échap</Key></span>
         </button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 px-5 py-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 px-3 py-5 sm:px-5 sm:py-8">
         <div key={lead.id} className="rise-in">
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -176,9 +200,13 @@ export function CallMode({
             )}
           </div>
 
-          <h1 className="mt-3 text-4xl leading-[1.05] font-semibold tracking-tight sm:text-5xl">
+          <h1 className="mt-3 text-[1.85rem] leading-[1.05] font-semibold tracking-tight sm:text-4xl lg:text-5xl">
             {lead.name}
           </h1>
+
+          <div className="mt-4 max-w-lg">
+            <DirigeantLine lead={lead} large />
+          </div>
 
           <p className="mt-2 text-sm text-muted">
             {reasons.slice(0, 2).join(' · ')}
@@ -193,7 +221,7 @@ export function CallMode({
                   className="group inline-flex items-center gap-3 rounded-lg border-2 border-lime-line bg-lime-soft px-5 py-3 transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-lift)]"
                 >
                   <Phone className="size-6 text-lime-deep transition-transform group-hover:rotate-12" />
-                  <span className="tnum text-3xl font-semibold text-lime-deep sm:text-4xl">{lead.phone}</span>
+                  <span className="tnum text-xl font-semibold break-all text-lime-deep sm:text-3xl lg:text-4xl">{lead.phone}</span>
                 </a>
                 <button
                   type="button"
@@ -255,7 +283,7 @@ export function CallMode({
         <div className="pointer-events-none fixed inset-0 z-10 flex items-center justify-center">
           <span
             className={cx(
-              'stamp rounded-lg border-4 px-8 py-3 font-mono text-4xl font-bold tracking-[0.2em] uppercase',
+              'stamp rounded-lg border-4 px-5 py-2 font-mono text-2xl font-bold tracking-[0.2em] uppercase sm:px-8 sm:py-3 sm:text-4xl',
               verdict === 'termine' ? 'border-lime-deep text-lime-deep' : 'border-ember text-ember',
             )}
           >
@@ -266,7 +294,7 @@ export function CallMode({
 
       {/* Barre de commandes */}
       <footer className="border-t border-rule bg-card px-4 py-3">
-        <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-2">
+        <div className="mx-auto flex max-w-3xl flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <button
             type="button"
             onClick={() => decide('termine')}

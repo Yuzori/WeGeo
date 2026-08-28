@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../shared/types';
 import { TIER_COLORS, formatCoords, hueOf, initials, potential, tierLabel } from '../lib/lead';
+import { DirigeantLine } from './DirigeantLine';
 import { IconButton, Tag, cx, useToast } from './ui';
 
 const mapsSearch = (query: string) =>
@@ -179,8 +180,8 @@ export function LeadCard({
         title="Ouvrir la fiche Google Maps"
         aria-label="Ouvrir la fiche Google Maps"
         className={cx(
-          'inline-flex size-8 items-center justify-center rounded-md border border-transparent text-faint',
-          'transition-colors duration-150 hover:bg-lime-soft hover:text-lime-deep',
+          'icon-btn icon-btn-fly inline-flex size-8 items-center justify-center rounded-md border border-transparent text-faint',
+          'transition-[color,background-color,transform] duration-150 hover:-translate-y-px hover:bg-lime-soft hover:text-lime-deep',
         )}
       >
         <ExternalLink className="size-4" />
@@ -244,7 +245,6 @@ export function LeadCard({
         tone="danger"
         motion="shake"
         active={armed}
-        className={armed ? 'animate-pulse' : undefined}
         onClick={() => (armed ? onDelete(lead) : setArmed(true))}
       >
         <Trash2 className="size-4" />
@@ -256,126 +256,124 @@ export function LeadCard({
     <article
       style={{ animationDelay: `${Math.min(index, 14) * 32}ms` }}
       className={cx(
-        'sheet deal-in group relative px-3.5 py-3.5 transition-all duration-200',
-        'hover:-translate-y-0.5 hover:border-rule-strong hover:shadow-[var(--shadow-lift)]',
+        'sheet deal-in group relative px-3.5 py-3 transition-shadow duration-200',
+        'hover:border-rule-strong hover:shadow-[var(--shadow-lift)]',
         selected && 'border-lime-deep ring-1 ring-lime-deep',
         lead.status === 'perdu' && 'opacity-65 hover:opacity-100',
       )}
     >
-      {/* Filet de rive : il s'allume au survol, comme un onglet de classeur. */}
-      <span
-        aria-hidden
-        className={cx(
-          'absolute inset-y-2 left-0 w-[3px] rounded-r transition-all duration-300',
-          lead.status === 'termine' ? 'bg-lime' : 'bg-transparent group-hover:bg-lime-line',
-        )}
-      />
-
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         {onToggleSelect && (
           <input
             type="checkbox"
             checked={!!selected}
             onChange={() => onToggleSelect(lead.id)}
             aria-label={`Sélectionner ${lead.name}`}
-            className="mt-3 size-4 shrink-0 cursor-pointer rounded accent-[var(--lime-deep)]"
+            className="mt-2.5 size-4 shrink-0 cursor-pointer rounded accent-[var(--lime-deep)]"
           />
         )}
 
         <Marker name={lead.name} dimmed={lead.status === 'perdu'} />
 
         <div className="min-w-0 flex-1">
-          {/* Nom + étiquettes */}
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="text-[15px] leading-tight font-semibold">{lead.name}</h3>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="truncate text-[15px] leading-tight font-semibold">{lead.name}</h3>
+                {lead.websiteKind === 'aucun' ? (
+                  <Tag tone="lime">
+                    <Globe className="size-3" /> aucun site
+                  </Tag>
+                ) : (
+                  <Tag tone="outline">
+                    <Globe className="size-3" /> {linkLabel(lead.website ?? '')} seul
+                  </Tag>
+                )}
+                {lead.status === 'termine' && (
+                  <span className="stamp inline-flex items-center gap-1 rounded border-2 border-lime-deep px-1.5 py-px font-mono text-[10px] font-bold tracking-[0.18em] text-lime-deep uppercase">
+                    <Check className="size-3" /> signé
+                  </span>
+                )}
+                {lead.status === 'perdu' && (
+                  <span className="inline-flex -rotate-3 items-center gap-1 rounded border-2 border-dashed border-rule-strong px-1.5 py-px font-mono text-[10px] font-bold tracking-[0.18em] text-faint uppercase">
+                    non conclu
+                  </span>
+                )}
+                {lead.seenCount > 1 && <Tag>vu {lead.seenCount}×</Tag>}
+              </div>
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                {lead.category && <span className="font-medium">{lead.category}</span>}
+                {lead.rating != null && (
+                  <span className="tnum inline-flex items-center gap-0.5">
+                    <Star className="size-3 fill-current text-ember" />
+                    {lead.rating.toFixed(1).replace('.', ',')}
+                    {lead.reviewCount != null && <span className="text-faint">({lead.reviewCount})</span>}
+                  </span>
+                )}
+                {!sameLabel(lead.category, lead.domain) && lead.domain && (
+                  <span className="text-faint">recherché : {lead.domain}</span>
+                )}
+              </p>
+            </div>
 
-            {lead.websiteKind === 'aucun' ? (
-              <Tag tone="lime">
-                <Globe className="size-3" /> aucun site
-              </Tag>
-            ) : (
-              <Tag tone="outline">
-                <Globe className="size-3" /> {linkLabel(lead.website ?? '')} seul
-              </Tag>
-            )}
-
-            {/* Tampon encreur, légèrement de travers. */}
-            {lead.status === 'termine' && (
-              <span className="stamp inline-flex items-center gap-1 rounded border-2 border-lime-deep px-1.5 py-px font-mono text-[10px] font-bold tracking-[0.18em] text-lime-deep uppercase">
-                <Check className="size-3" /> signé
-              </span>
-            )}
-            {lead.status === 'perdu' && (
-              <span className="inline-flex -rotate-3 items-center gap-1 rounded border-2 border-dashed border-rule-strong px-1.5 py-px font-mono text-[10px] font-bold tracking-[0.18em] text-faint uppercase">
-                non conclu
-              </span>
-            )}
-            {lead.seenCount > 1 && <Tag>vu {lead.seenCount}×</Tag>}
+            <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+              <div className="flex items-center gap-0.5">{actions}</div>
+              <PotentialGauge lead={lead} />
+            </div>
           </div>
 
-          {/* Métadonnées */}
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-faint">
-            {lead.category && <span className="font-medium text-muted">{lead.category}</span>}
-            {lead.rating != null && (
-              <span className="tnum inline-flex items-center gap-0.5 text-muted">
-                <Star className="size-3 fill-current text-ember" />
-                {lead.rating.toFixed(1).replace('.', ',')}
-                {lead.reviewCount != null && <span className="ml-0.5 text-faint">({lead.reviewCount})</span>}
-              </span>
-            )}
-            {/* Le métier recherché n'est utile que s'il diffère de l'activité affichée. */}
-            {!sameLabel(lead.category, lead.domain) && <span>recherché : {lead.domain}</span>}
-          </div>
+          <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+            <DirigeantLine lead={lead} />
 
-          {/* Contact : téléphone et adresse cliquables */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {lead.phone ? (
-              <span className="inline-flex items-center overflow-hidden rounded-md border border-lime-line bg-lime-soft">
+            <div className="min-w-0">
+              <p className="legend">contact</p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                {lead.phone ? (
+                  <>
+                    <a
+                      href={`tel:${lead.phone.replace(/\s/g, '')}`}
+                      className="tnum inline-flex items-center gap-1.5 text-sm font-semibold text-lime-deep hover:underline"
+                    >
+                      <Phone className="size-3.5" />
+                      {lead.phone}
+                    </a>
+                    <IconButton
+                      label="Copier le numéro"
+                      motion="pop"
+                      className="size-7"
+                      onClick={() => copy(lead.phone!, 'Numéro')}
+                    >
+                      <Copy className="size-3.5" />
+                    </IconButton>
+                  </>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-sm text-faint">
+                    <PhoneOff className="size-3.5" /> pas de numéro
+                  </span>
+                )}
+              </div>
+              {lead.address && (
                 <a
-                  href={`tel:${lead.phone.replace(/\s/g, '')}`}
-                  className="tnum inline-flex items-center gap-1.5 py-1 pr-2 pl-2.5 text-sm font-semibold text-lime-deep transition hover:brightness-110"
+                  href={mapsSearch(`${lead.name} ${lead.address}`)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted hover:text-ink"
                 >
-                  <Phone className="size-3.5" />
-                  {lead.phone}
+                  <MapPin className="size-3.5 shrink-0" />
+                  <span className="truncate">{lead.address}</span>
                 </a>
-                <button
-                  type="button"
-                  onClick={() => copy(lead.phone!, 'Numéro')}
-                  title="Copier le numéro"
-                  aria-label="Copier le numéro"
-                  className="h-full self-stretch px-1.5 text-lime-deep/60 transition-colors hover:bg-lime-line hover:text-lime-deep"
-                >
-                  <Copy className="size-3.5" />
-                </button>
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-rule-strong px-2.5 py-1 text-sm text-faint">
-                <PhoneOff className="size-3.5" /> pas de numéro
-              </span>
-            )}
-
-            {lead.address && (
-              <a
-                href={mapsSearch(`${lead.name} ${lead.address}`)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-transparent px-1.5 py-1 text-sm text-muted transition hover:border-rule hover:bg-card-2 hover:text-ink"
-              >
-                <MapPin className="size-3.5 shrink-0" />
-                <span className="truncate">{lead.address}</span>
-              </a>
-            )}
+              )}
+            </div>
           </div>
 
-          {/* Relevé de position, comme en bas d'une carte. */}
           {coords && (
-            <p className="mt-2 font-mono text-[10px] tracking-wide text-faint opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+            <p className="mt-1.5 font-mono text-[10px] tracking-wide text-faint opacity-0 transition-opacity duration-300 group-hover:opacity-100">
               {coords}
             </p>
           )}
 
           {lead.notes && !notesOpen && (
-            <p className="mt-2.5 rounded-md border border-rule border-l-2 border-l-lime bg-card-2 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-muted">
+            <p className="mt-2 rounded-md border border-rule border-l-2 border-l-lime bg-card-2 px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-muted">
               {lead.notes}
             </p>
           )}
@@ -395,20 +393,13 @@ export function LeadCard({
               }}
               rows={2}
               placeholder="Compte-rendu d'appel, objection, date de rappel…"
-              className="field mt-2.5 resize-y text-xs"
+              className="field mt-2 resize-y text-xs"
             />
           )}
 
-          <div className="mt-2 -mr-1 flex items-center justify-end gap-0.5 border-t border-rule pt-1.5 sm:hidden">
+          <div className="mt-2 flex items-center justify-end gap-0.5 border-t border-rule pt-1.5 sm:hidden">
             {actions}
           </div>
-        </div>
-
-        <div className="hidden shrink-0 flex-col items-end gap-1.5 sm:flex">
-          <div className="flex items-center gap-0.5 opacity-80 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100">
-            {actions}
-          </div>
-          <PotentialGauge lead={lead} />
         </div>
       </div>
     </article>

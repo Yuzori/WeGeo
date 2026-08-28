@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Clock, MapPin, PlayCircle, RotateCcw, Table2, Trash2 } from 'lucide-react';
 import { isResumable, type Lead, type SearchRecord } from '../../shared/types';
 import { api } from '../api';
-import { SESSION_KEY } from '../hooks';
+import { searchSessionKey } from '../hooks';
 import { LeadCard } from '../components/LeadCard';
 import { SheetModal } from '../components/SheetModal';
 import { Button, EmptyState, IconButton, Spinner, Tag, useToast } from '../components/ui';
 import { useLeadCollection, useMeta } from '../hooks';
+import { sessionPath } from '../workspace';
 
 const STATUS_STYLE: Record<
   SearchRecord['status'],
@@ -38,6 +39,7 @@ function formatDuration(ms: number | null): string {
 export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => void }) {
   const notify = useToast();
   const navigate = useNavigate();
+  const { workspaceId } = useParams();
   const { refreshMeta } = useMeta();
   const [searches, setSearches] = useState<SearchRecord[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -59,8 +61,8 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
   const resume = async (search: SearchRecord) => {
     try {
       await api.resumeSearch(search.id);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(search.id));
-      navigate('/app');
+      localStorage.setItem(searchSessionKey(workspaceId ?? '0'), JSON.stringify(search.id));
+      navigate(sessionPath(workspaceId ?? ''));
     } catch (err) {
       notify(err instanceof Error ? err.message : 'La reprise a échoué', 'error');
     }
@@ -84,7 +86,7 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-[2rem] leading-none font-semibold tracking-tight">Historique</h1>
+        <h1 className="text-[1.55rem] leading-none font-semibold tracking-tight sm:text-[2rem]">Historique</h1>
         <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-muted">
           Tous vos relevés passés. Rejouez-les en un clic ou consultez leurs fiches.
         </p>

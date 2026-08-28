@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n';
 
-export const GUIDE_STORAGE_KEY = 'prospy.guide.v1';
-export const GUIDE_STEPS = ['logo', 'search', 'launch', 'results', 'pipeline'] as const;
+export const GUIDE_STORAGE_KEY = 'prospy.guide.v3';
+export const GUIDE_STEPS = ['logo', 'search', 'launch', 'results', 'pipeline', 'invite'] as const;
 export type GuideStep = (typeof GUIDE_STEPS)[number];
 
 function visibleSlot(step: GuideStep): HTMLElement | null {
@@ -62,7 +62,7 @@ export function MascotGuide({
 
   if (!step) return null;
 
-  const last = step === 'pipeline';
+  const last = step === 'invite';
   const radius = step === 'logo' ? 999 : 18;
 
   return (
@@ -81,12 +81,15 @@ export function MascotGuide({
         />
       )}
       <div className="app-guide-dock">
-        <button type="button" className="app-guide-skip" onClick={onSkip}>
-          {m.guide.skip}
-        </button>
-        <button type="button" className="app-guide-next" onClick={onNext}>
-          {last ? m.guide.done : m.guide.next}
-        </button>
+        <p className="app-guide-line">{m.guide.steps[step]}</p>
+        <div className="app-guide-actions">
+          <button type="button" className="app-guide-skip" onClick={onSkip}>
+            {m.guide.skip}
+          </button>
+          <button type="button" className="app-guide-next" onClick={onNext}>
+            {last ? m.guide.done : m.guide.next}
+          </button>
+        </div>
       </div>
     </div>
   );

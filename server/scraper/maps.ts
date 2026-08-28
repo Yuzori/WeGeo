@@ -30,6 +30,10 @@ const CHROME_ARGS = [
   '--disable-blink-features=AutomationControlled',
   '--no-first-run',
   '--disable-dev-shm-usage',
+  '--disable-background-networking',
+  '--disable-sync',
+  '--mute-audio',
+  '--metrics-recording-only',
   ...(process.env.WEGEO_NO_SANDBOX === '1' ? ['--no-sandbox', '--disable-setuid-sandbox'] : []),
 ];
 
@@ -88,21 +92,12 @@ export async function closeBrowser(): Promise<void> {
 
 /** Accepte la bannière de cookies (une seule fois grâce au profil persistant). */
 async function acceptConsent(page: Page): Promise<void> {
-  const labels = [
-    'Tout accepter',
-    'Accepter tout',
-    "J'accepte",
-    'Accepter',
-    'Accept all',
-    'Alles accepteren',
-  ];
-  for (const label of labels) {
-    const button = page.getByRole('button', { name: label, exact: false }).first();
-    if (await button.isVisible({ timeout: 1200 }).catch(() => false)) {
-      await button.click({ timeout: 4000 }).catch(() => {});
-      await page.waitForTimeout(1200);
-      return;
-    }
+  const button = page
+    .getByRole('button', { name: /tout accepter|accepter tout|j['’]accepte|^accepter$|accept all|alles accepteren/i })
+    .first();
+  if (await button.isVisible({ timeout: 280 }).catch(() => false)) {
+    await button.click({ timeout: 2_000 }).catch(() => {});
+    await page.waitForTimeout(120);
   }
 }
 
@@ -116,6 +111,32 @@ export interface RawCard {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const jitter = (min: number, max: number) => sleep(min + Math.random() * (max - min));
+
+/** Onglets de fiches détaillées partagés entre tous les métiers en cours. */
+const DETAIL_PAGE_CAP = (() => {
+  const value = Number(process.env.WEGEO_DETAIL_CONCURRENCY);
+  return Number.isFinite(value) && value >= 1 ? Math.min(16, Math.floor(value)) : 10;
+})();
+
+class Gate {
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+  constructor(private readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.active < this.max) {
+      this.active += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+  }
+  release(): void {
+    const next = this.waiters.shift();
+    if (next) next();
+    else this.active -= 1;
+  }
+}
+
+const detailGate = new Gate(DETAIL_PAGE_CAP);
 
 function searchUrl(query: string, tile: Tile | null): string {
   const q = encodeURIComponent(query);
@@ -162,7 +183,11 @@ export async function scrapeList(
       await page.close().catch(() => {});
     }
 
-    if (attempt < 3) await jitter(2_500 * attempt, 5_000 * attempt);
+    if (attempt < 3) {
+      const blocked = /blocage|sorry|captcha|robot/i.test(lastReason);
+      if (blocked) await jitter(1_800 * attempt, 3_200 * attempt);
+      else await jitter(350 * attempt, 800 * attempt);
+    }
   }
 
   throw new Error(`Google n'a pas répondu (${lastReason}). Réessayez dans quelques minutes.`);
@@ -176,11 +201,11 @@ async function attemptList(
   { max, onProgress, isCancelled }: ScrapeListOptions,
 ): Promise<{ cards: RawCard[] } | { cards: null; reason: string }> {
   {
-    await page.goto(searchUrl(query, tile), { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    await page.goto(searchUrl(query, tile), { waitUntil: 'domcontentloaded', timeout: 28_000 });
     await acceptConsent(page);
 
     const feed = page.locator('div[role="feed"]').first();
-    const hasFeed = await feed.waitFor({ state: 'attached', timeout: 20_000 }).then(
+    const hasFeed = await feed.waitFor({ state: 'attached', timeout: 12_000 }).then(
       () => true,
       () => false,
     );
@@ -210,7 +235,7 @@ async function attemptList(
 
       // On repart dès que de nouvelles fiches apparaissent, sans attendre
       // un délai fixe : c'est là que se gagne l'essentiel du temps.
-      const grown = await waitForGrowth(page, count, 2200);
+      const grown = await waitForGrowth(page, count, 1_400);
 
       if (grown.count === count) {
         if (grown.atEnd || ++stagnant >= 3) break;
@@ -255,7 +280,7 @@ async function waitForGrowth(
   let state = await feedState(page);
 
   while (state.count === previous && !state.atEnd && Date.now() < deadline) {
-    await sleep(160);
+    await sleep(50);
     state = await feedState(page);
   }
   return state;
@@ -405,14 +430,14 @@ async function readPlaceDetails(page: Page): Promise<PlaceDetails | null> {
 async function readPlaceIn(page: Page, mapsUrl: string): Promise<PlaceDetails | null> {
   try {
     const url = mapsUrl.includes('hl=') ? mapsUrl : `${mapsUrl}${mapsUrl.includes('?') ? '&' : '?'}hl=fr`;
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40_000 });
+    await page.goto(url, { waitUntil: 'commit', timeout: 18_000 });
 
+    await page.locator('h1').first().waitFor({ state: 'attached', timeout: 6_000 }).catch(() => {});
     await page
       .locator('button[data-item-id="address"], button[data-item-id^="phone:tel:"], a[data-item-id="authority"]')
       .first()
-      .waitFor({ state: 'attached', timeout: 12_000 })
+      .waitFor({ state: 'attached', timeout: 4_000 })
       .catch(() => {});
-    await page.waitForTimeout(120);
 
     return await readPlaceDetails(page);
   } catch (err) {
@@ -432,8 +457,8 @@ export async function fetchPlaceDetails(mapsUrl: string): Promise<PlaceDetails |
 }
 
 /**
- * Enrichit plusieurs fiches en parallèle (petit pool pour rester discret et
- * ne pas saturer la machine).
+ * Enrichit plusieurs fiches en parallèle. Le nombre d’onglets est plafonné
+ * globalement pour que plusieurs métiers en même temps ne saturent pas Chromium.
  */
 export async function fetchPlaceDetailsBatch<T>(
   items: T[],
@@ -441,25 +466,26 @@ export async function fetchPlaceDetailsBatch<T>(
   onResult: (item: T, details: PlaceDetails | null) => void | Promise<void>,
   opts: { concurrency?: number; isCancelled?: () => boolean } = {},
 ): Promise<void> {
+  if (!items.length) return;
   const ctx = await getContext();
-  const concurrency = Math.max(1, Math.min(6, opts.concurrency ?? 5, items.length));
   let cursor = 0;
+  const spawn = Math.max(1, Math.min(DETAIL_PAGE_CAP, opts.concurrency ?? DETAIL_PAGE_CAP, items.length));
 
-  // Chaque ouvrier garde sa propre page et la réutilise : ouvrir un onglet
-  // par fiche coûtait plus cher que la lecture elle-même.
   const worker = async () => {
-    const page = await ctx.newPage();
+    await detailGate.acquire();
+    let page: Page | null = null;
     try {
+      page = await ctx.newPage();
       while (cursor < items.length) {
         if (opts.isCancelled?.()) return;
         const item = items[cursor++];
         await onResult(item, await readPlaceIn(page, urlOf(item)));
-        await jitter(120, 320);
       }
     } finally {
-      await page.close().catch(() => {});
+      await page?.close().catch(() => {});
+      detailGate.release();
     }
   };
 
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  await Promise.all(Array.from({ length: spawn }, worker));
 }

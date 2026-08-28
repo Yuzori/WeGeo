@@ -146,6 +146,10 @@ export function useLeadCollection(query: LeadQuery | null, onChange?: () => void
 /** Identifiant du relevé en cours de session, partagé entre les écrans. */
 export const SESSION_KEY = 'wegeo.session';
 
+export function searchSessionKey(workspaceId: number | string): string {
+  return `${SESSION_KEY}.${workspaceId}`;
+}
+
 /** Persiste une préférence dans le navigateur (options de recherche, ville…). */
 export function useStored<T>(key: string, initial: T): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {

@@ -17,10 +17,13 @@ import { StatStrip } from '../components/StatStrip';
 import { RecentSearches } from '../components/RecentSearches';
 import { Button, EmptyState, IconButton, LeadSkeleton, useToast } from '../components/ui';
 import { potential } from '../lib/lead';
-import { SESSION_KEY, useLeadCollection, useMeta, useStored } from '../hooks';
+import { searchSessionKey, useLeadCollection, useMeta, useStored } from '../hooks';
+import { sessionPath } from '../workspace';
+import { useParams } from 'react-router-dom';
 
 export function SearchPage() {
   const notify = useToast();
+  const { workspaceId } = useParams();
   const { meta, refreshMeta } = useMeta();
 
   const [city, setCity] = useStored('wegeo.city', '');
@@ -29,7 +32,7 @@ export function SearchPage() {
 
   // Identifiant du dernier relevé lancé : c'est lui qui permet de retrouver la
   // session après un changement d'onglet ou une fermeture du navigateur.
-  const [sessionId, setSessionId] = useStored<number | null>(SESSION_KEY, null);
+  const [sessionId, setSessionId] = useStored<number | null>(searchSessionKey(workspaceId ?? '0'), null);
   const [searchId, setSearchId] = useState<number | null>(null);
   const [interrupted, setInterrupted] = useState<SearchRecord | null>(null);
   const [running, setRunning] = useState(false);
@@ -65,7 +68,13 @@ export function SearchPage() {
           // Chaque fiche arrive dès qu'elle est vérifiée : la liste se remplit
           // sous les yeux au lieu d'attendre la fin du balayage.
           case 'lead':
-            collection.setLeads((list) => [...list, event.lead]);
+            collection.setLeads((list) => {
+              const index = list.findIndex((row) => row.id === event.lead.id);
+              if (index === -1) return [...list, event.lead];
+              const next = list.slice();
+              next[index] = event.lead;
+              return next;
+            });
             break;
 
           case 'done':
@@ -208,7 +217,7 @@ export function SearchPage() {
     <div className="space-y-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-[2rem] leading-none font-extrabold tracking-tight">
+          <h1 className="font-display text-[1.55rem] leading-none font-extrabold tracking-tight sm:text-[2rem]">
             Les commerces <span className="marker">sans site web</span>
           </h1>
           <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-muted">
@@ -217,11 +226,18 @@ export function SearchPage() {
           </p>
         </div>
         {results.length > 0 && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button icon={<Map className="size-4" />} onClick={() => setMapOpen(true)}>
               Carte
             </Button>
-            <Button icon={<Table2 className="size-4" />} onClick={() => setSheetOpen(true)} disabled={!searchId}>
+            <Button
+              icon={<Table2 className="size-4" />}
+              onClick={() => {
+                setMapOpen(false);
+                setSheetOpen(true);
+              }}
+              disabled={!searchId}
+            >
               Tableur
             </Button>
           </div>
@@ -285,19 +301,20 @@ export function SearchPage() {
           startedAt={startedAt}
           onStop={running ? cancel : undefined}
           onExpandMap={() => setMapOpen(true)}
+          showMap={!sheetOpen}
         />
       )}
 
       {/* Au repos, l'écran sert de tableau de bord plutôt que de page vide. */}
       {idle && hasData && (
         <>
-          <StatStrip stats={meta!.stats} />
-          <RecentSearches onReplay={replay} />
+          <StatStrip stats={meta!.stats} base={sessionPath(workspaceId ?? '')} />
+          <RecentSearches onReplay={replay} historyTo={sessionPath(workspaceId ?? '', '/historique')} />
         </>
       )}
 
       {/* Bilan du relevé terminé, avec la carte des positions trouvées. */}
-      {!running && results.length > 0 && (
+      {!running && results.length > 0 && !sheetOpen && (
         <section className="sheet-raised rise-in grid gap-5 p-4 sm:grid-cols-[minmax(0,180px)_1fr]">
           <MiniMap leads={results} onExpand={() => setMapOpen(true)} className="mx-auto w-full max-w-[220px]" />
           <div className="flex flex-col justify-center gap-2">
@@ -364,7 +381,7 @@ export function SearchPage() {
         />
       )}
 
-      {mapOpen && <MapView leads={results} onClose={() => setMapOpen(false)} />}
+      {mapOpen && !sheetOpen && <MapView leads={results} onClose={() => setMapOpen(false)} />}
     </div>
   );
 }

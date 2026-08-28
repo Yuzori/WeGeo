@@ -51,7 +51,7 @@ export function PipelinePage({
     return collection.leads.filter((lead) => {
       if (city && lead.city !== city) return false;
       if (!needle) return true;
-      return [lead.name, lead.address, lead.phone, lead.category, lead.domain, lead.notes]
+      return [lead.name, lead.dirigeant, lead.address, lead.phone, lead.category, lead.domain, lead.notes]
         .filter(Boolean)
         .some((field) => field!.toLowerCase().includes(needle));
     });
@@ -62,7 +62,7 @@ export function PipelinePage({
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="legend mb-2">{EYEBROW[status]}</p>
-          <h1 className="flex items-center gap-2.5 text-[2rem] leading-none font-semibold tracking-tight">
+          <h1 className="flex flex-wrap items-center gap-2.5 text-[1.55rem] leading-none font-semibold tracking-tight sm:text-[2rem]">
             <span className="text-lime-deep">{icon}</span>
             {title}
             {collection.leads.length > 0 && (
@@ -74,7 +74,7 @@ export function PipelinePage({
           <p className="mt-2.5 max-w-xl text-sm leading-relaxed text-muted">{description}</p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="ghost" icon={<RefreshCw className="size-4" />} onClick={collection.refresh}>
             Actualiser
           </Button>
@@ -83,7 +83,10 @@ export function PipelinePage({
           </Button>
           <Button
             icon={<Table2 className="size-4" />}
-            onClick={() => setSheetOpen(true)}
+            onClick={() => {
+              setMapOpen(false);
+              setSheetOpen(true);
+            }}
             disabled={!collection.leads.length}
           >
             Tableur
@@ -93,7 +96,7 @@ export function PipelinePage({
 
       {collection.leads.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          <div className="relative min-w-[220px] flex-1">
+          <div className="relative min-w-0 flex-1 sm:min-w-[220px]">
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
             <input
               value={term}
@@ -131,7 +134,7 @@ export function PipelinePage({
 
       <SheetModal open={sheetOpen} onClose={() => setSheetOpen(false)} query={{ status }} title={title.toLowerCase()} />
 
-      {mapOpen && <MapView leads={filtered} onClose={() => setMapOpen(false)} />}
+      {mapOpen && !sheetOpen && <MapView leads={filtered} onClose={() => setMapOpen(false)} />}
     </div>
   );
 }

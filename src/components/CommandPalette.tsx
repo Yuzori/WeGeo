@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowRight,
   Check,
-  Command,
   History,
   Inbox,
+  Layers,
   MapPin,
   Moon,
   Phone,
-  Radar,
+  Search,
+  Settings,
   Star,
   ThumbsDown,
 } from 'lucide-react';
@@ -17,6 +18,8 @@ import type { Lead } from '../../shared/types';
 import { api } from '../api';
 import { formatPhone } from '../lib/lead';
 import { cx, useToast } from './ui';
+import { sessionPath } from '../workspace';
+import { rememberSettingsFrom } from '../lib/nav';
 
 interface Action {
   id: string;
@@ -37,8 +40,17 @@ const fold = (value: string) =>
  * Palette de commandes (Ctrl/⌘ + K) : navigation, réglages, et recherche
  * directe dans les prospects déjà enregistrés.
  */
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({
+  open,
+  onClose,
+  workspaceId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  workspaceId?: number;
+}) {
   const navigate = useNavigate();
+  const location = useLocation();
   const notify = useToast();
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<Lead[]>([]);
@@ -72,13 +84,26 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       onClose();
     };
 
+    const base = workspaceId ? sessionPath(workspaceId) : '/app';
     return [
-      { id: 'search', label: 'Nouvelle recherche', hint: 'Lancer un balayage', icon: <Radar className="size-4" />, run: goto('/app') },
-      { id: 'tri', label: 'À trier', hint: 'Prospects non classés', icon: <Inbox className="size-4" />, run: goto('/app/a-trier') },
-      { id: 'fav', label: 'Favoris', hint: 'À appeler', icon: <Star className="size-4" />, run: goto('/app/favoris') },
-      { id: 'signe', label: 'Signés', icon: <Check className="size-4" />, run: goto('/app/signes') },
-      { id: 'perdu', label: 'Non conclus', icon: <ThumbsDown className="size-4" />, run: goto('/app/non-conclus') },
-      { id: 'hist', label: 'Historique des recherches', icon: <History className="size-4" />, run: goto('/app/historique') },
+      { id: 'sessions', label: 'Mes sessions', hint: 'Changer d’espace', icon: <Layers className="size-4" />, run: goto('/app') },
+      { id: 'search', label: 'Nouvelle recherche', hint: 'Lancer un balayage', icon: <Search className="size-4" />, run: goto(base) },
+      { id: 'tri', label: 'À trier', hint: 'Prospects non classés', icon: <Inbox className="size-4" />, run: goto(`${base}/a-trier`) },
+      { id: 'appels', label: 'Session d’appels', hint: 'Une fiche à la fois', icon: <Phone className="size-4" />, run: goto(`${base}/appels`) },
+      { id: 'fav', label: 'Favoris', hint: 'À appeler', icon: <Star className="size-4" />, run: goto(`${base}/favoris`) },
+      { id: 'signe', label: 'Signés', icon: <Check className="size-4" />, run: goto(`${base}/signes`) },
+      { id: 'perdu', label: 'Non conclus', icon: <ThumbsDown className="size-4" />, run: goto(`${base}/non-conclus`) },
+      { id: 'hist', label: 'Historique des recherches', icon: <History className="size-4" />, run: goto(`${base}/historique`) },
+      {
+        id: 'compte',
+        label: 'Réglages du compte',
+        hint: 'Photo, pseudo, mot de passe',
+        icon: <Settings className="size-4" />,
+        run: () => {
+          rememberSettingsFrom(`${location.pathname}${location.search}${location.hash}`);
+          goto('/app/compte')();
+        },
+      },
       {
         id: 'theme',
         label: 'Basculer jour / nuit',
@@ -90,7 +115,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         },
       },
     ];
-  }, [navigate, onClose]);
+  }, [location.hash, location.pathname, location.search, navigate, onClose, workspaceId]);
 
   const filtered = useMemo(() => {
     const q = fold(query.trim());
@@ -147,7 +172,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center px-4 pt-[12vh]">
+    <div className="fixed inset-0 z-[80] flex items-start justify-center px-3 pt-[max(4.5rem,env(safe-area-inset-top)+1rem)] sm:px-4 sm:pt-[12vh]">
       <div className="absolute inset-0 bg-[hsl(var(--shade)/0.45)] backdrop-blur-[3px]" onClick={onClose} aria-hidden />
 
       <div
@@ -157,7 +182,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         className="pop-in relative w-full max-w-lg overflow-hidden rounded-lg border border-rule bg-card shadow-[var(--shadow-float)]"
       >
         <div className="flex items-center gap-2.5 border-b border-rule px-3.5 py-3">
-          <Command className="size-4 shrink-0 text-faint" aria-hidden />
+          <Search className="size-4 shrink-0 text-faint" aria-hidden />
           <input
             ref={input}
             value={query}
@@ -203,7 +228,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                     <>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{row.lead.name}</span>
-                        <span className="legend">{row.lead.city}</span>
+                        <span className="legend">
+                          {row.lead.dirigeant
+                            ? `${row.lead.dirigeant} · ${row.lead.city}`
+                            : row.lead.dirigeantStatus === 'missing'
+                              ? `Dirigeant non trouvé · ${row.lead.city}`
+                              : row.lead.city}
+                        </span>
                       </span>
                       {row.lead.phone && (
                         <span className="tnum inline-flex items-center gap-1 text-xs text-muted">

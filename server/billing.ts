@@ -34,12 +34,18 @@ function envPrice(plan: PlanId): string | undefined {
   return value || undefined;
 }
 
-function amountLabel(plan: PlanId, fallback: string): string {
+function amountLabel(plan: PlanId): string {
   const centsRaw = process.env[`PLAN_${plan.toUpperCase()}_CENTS`];
-  const cents = centsRaw ? Number(centsRaw) : NaN;
-  if (!Number.isFinite(cents) || cents < 0) return fallback;
+  const parsed = centsRaw ? Number(centsRaw) : NaN;
+  const cents = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CENTS[plan];
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 }
+
+const DEFAULT_CENTS: Record<PlanId, number> = {
+  starter: 1900,
+  pro: 4900,
+  agence: 8900,
+};
 
 const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
   {
@@ -49,10 +55,18 @@ const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
     interval: 'month',
     cta: 'Choisir Starter',
     features: [
-      'Recherche Google Maps des commerces sans site',
-      'Pipeline À trier / Favoris / Signé / Non conclu',
-      'Notes d’appel et export CSV / Excel',
-      'Un compte, données isolées',
+      'Relevé Google Maps des commerces sans site',
+      'Pipeline d’appels : trier, appeler, classer',
+      'Export CSV / Excel',
+      '1 compte, 1 session personnelle',
+      '2 métiers et 50 entreprises par relevé',
+    ],
+    locked: [
+      'Nom du dirigeant',
+      'Invitations d’équipe',
+      'Quadrillage des grandes villes',
+      'Tous les réglages de recherche',
+      'Carte, score et session d’appels clavier',
     ],
   },
   {
@@ -64,10 +78,17 @@ const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
     cta: 'Choisir Pro',
     features: [
       'Tout Starter',
-      'Score de potentiel et carte de France',
-      'Session d’appels au clavier',
-      'Reprise d’un relevé interrompu',
-      'Tableur et copie vers Google Sheets',
+      'Nom du dirigeant (SIRENE) et lien source',
+      '8 métiers et 250 entreprises par relevé',
+      'Quadrillage 2 × 2',
+      'Inviter 2 personnes',
+      'Carte, score, session d’appels, Google Sheets',
+      'Réglages de recherche étendus',
+    ],
+    locked: [
+      'Quadrillage large (jusqu’à 5 × 5)',
+      'Volume de relevé illimité',
+      'Plus de 3 personnes par session',
     ],
   },
   {
@@ -78,9 +99,10 @@ const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
     cta: 'Choisir Agence',
     features: [
       'Tout Pro',
-      'Quadrillage des grandes villes',
-      'Lots de métiers et historique complet',
-      'Actions groupées sur les fiches',
+      '15 métiers et 1 000 entreprises par relevé',
+      'Tous les réglages, quadrillage jusqu’à 5 × 5',
+      'Jusqu’à 10 personnes par session',
+      'Historique complet et actions groupées',
     ],
   },
 ];
@@ -91,7 +113,7 @@ export function publicBillingConfig(): BillingPublicConfig {
 
   const plans: BillingPlan[] = CATALOG.map((plan) => ({
     ...plan,
-    amountLabel: amountLabel(plan.id, 'Tarif affiché au paiement'),
+    amountLabel: amountLabel(plan.id),
     priceConfigured: Boolean(envPrice(plan.id)),
   }));
 

@@ -256,7 +256,7 @@ export function SearchForm({
               onBlur={() => addDomain(draft)}
               placeholder={domains.length ? 'ajouter…' : 'coiffeur, plombier, restaurant…'}
               autoComplete="off"
-              className="min-w-[9rem] flex-1 bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-faint"
+              className="min-w-0 flex-1 bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-faint sm:min-w-[9rem]"
             />
           </div>
         </div>
@@ -363,7 +363,7 @@ export function SearchForm({
               checked={options.deepCheck}
               onChange={(v) => set('deepCheck', v)}
               label="Vérification approfondie"
-              hint="Ouvre chaque fiche pour le téléphone et l'adresse exacts. À laisser activé."
+              hint="Ouvre chaque fiche pour le téléphone et l'adresse exacts, et cherche le dirigeant. À laisser activé."
             />
             <Toggle
               checked={options.excludeHandled}

@@ -5,6 +5,8 @@ import type { Lead } from '../shared/types.ts';
 
 export const COLUMNS = [
   { key: 'name', label: 'Entreprise', width: 32 },
+  { key: 'dirigeant', label: 'Dirigeant', width: 24 },
+  { key: 'dirigeantSource', label: 'Source dirigeant', width: 44 },
   { key: 'category', label: 'Activité', width: 22 },
   { key: 'phone', label: 'Téléphone', width: 16 },
   { key: 'address', label: 'Adresse', width: 42 },
@@ -29,6 +31,10 @@ function cell(lead: Lead, key: (typeof COLUMNS)[number]['key']): string {
   switch (key) {
     case 'status':
       return STATUS_LABEL[lead.status];
+    case 'dirigeant':
+      return lead.dirigeant || (lead.dirigeantStatus === 'missing' ? 'Non trouvé' : '');
+    case 'dirigeantSource':
+      return lead.dirigeantSource ?? '';
     case 'website':
       return lead.websiteKind === 'aucun' ? 'Aucun site' : (lead.website ?? '');
     case 'rating':

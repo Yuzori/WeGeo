@@ -4,16 +4,16 @@ import type { Stats } from '../../shared/types';
 import { Counter, cx } from './ui';
 
 /** Bandeau de chiffres clés, cliquable pour aller directement au bon onglet. */
-export function StatStrip({ stats }: { stats: Stats }) {
+export function StatStrip({ stats, base = '/app' }: { stats: Stats; base?: string }) {
   const decided = stats.termine + stats.perdu;
   const rate = decided ? Math.round((stats.termine / decided) * 100) : null;
 
   const tiles = [
-    { to: '/app/a-trier', label: 'à trier', value: stats.nouveau, icon: Inbox },
-    { to: '/app/favoris', label: 'à appeler', value: stats.favori, icon: Star },
-    { to: '/app/signes', label: 'signés', value: stats.termine, icon: Check },
+    { to: `${base}/a-trier`, label: 'à trier', value: stats.nouveau, icon: Inbox },
+    { to: `${base}/favoris`, label: 'à appeler', value: stats.favori, icon: Star },
+    { to: `${base}/signes`, label: 'signés', value: stats.termine, icon: Check },
     {
-      to: '/app/signes',
+      to: `${base}/signes`,
       label: 'taux de signature',
       value: rate,
       suffix: '%',

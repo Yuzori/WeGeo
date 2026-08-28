@@ -39,6 +39,7 @@ export function ScanPanel({
   startedAt,
   onStop,
   onExpandMap,
+  showMap = true,
 }: {
   progress: ScanProgress;
   log: string[];
@@ -46,6 +47,7 @@ export function ScanPanel({
   startedAt: number;
   onStop?: () => void;
   onExpandMap?: () => void;
+  showMap?: boolean;
 }) {
   const percent = Math.round(Math.min(1, progress.ratio) * 100);
 
@@ -67,8 +69,8 @@ export function ScanPanel({
         )}
       </header>
 
-      <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,200px)_1fr]">
-        <MiniMap leads={leads} onExpand={onExpandMap} className="mx-auto w-full max-w-[220px]" />
+      <div className={cx('grid gap-5 p-4', showMap && 'sm:grid-cols-[minmax(0,200px)_1fr]')}>
+        {showMap && <MiniMap leads={leads} onExpand={onExpandMap} className="mx-auto w-full max-w-[220px]" />}
 
         <div className="flex min-w-0 flex-col">
           <div className="grid grid-cols-2 gap-3">

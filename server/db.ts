@@ -73,6 +73,10 @@ function addColumn(table: string, column: string, definition: string): void {
 addColumn('searches', 'total_tasks', 'INTEGER');
 addColumn('searches', 'done_tasks', 'TEXT');
 
+const now = () => new Date().toISOString();
+
+type Row = Record<string, unknown>;
+
 migrateTenancy();
 
 function migrateTenancy(): void {
@@ -118,7 +122,14 @@ function migrateTenancy(): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_leads_user ON leads(user_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_searches_user ON searches(user_id)');
   migrateAuthExtras();
+  migrateUsernames();
+  addColumn('users', 'needs_username', 'INTEGER NOT NULL DEFAULT 0');
+  migrateWorkspaces();
 }
+
+addColumn('leads', 'dirigeant', 'TEXT');
+addColumn('leads', 'dirigeant_source', 'TEXT');
+addColumn('leads', 'dirigeant_status', 'TEXT');
 
 function migrateAuthExtras(): void {
   const userCols = db.prepare('PRAGMA table_info(users)').all() as Row[];
@@ -145,6 +156,167 @@ function migrateAuthExtras(): void {
   if (!hadVerified) {
     db.prepare("UPDATE users SET email_verified = 1 WHERE password_hash != ''").run();
   }
+}
+
+function usernameSeed(email: string): string {
+  const local = email.split('@')[0]?.toLowerCase().replace(/[^a-z0-9._-]/g, '') ?? '';
+  let base = local.replace(/^[^a-z]+/, '') || 'user';
+  if (base.length < 3) base = `${base}user`;
+  return base.slice(0, 24);
+}
+
+function migrateUsernames(): void {
+  addColumn('users', 'username', 'TEXT');
+  const taken = new Set(
+    (db.prepare(`SELECT username FROM users WHERE username IS NOT NULL AND username != ''`).all() as Row[])
+      .map((row) => String(row.username).toLowerCase()),
+  );
+  const rows = db.prepare('SELECT id, email, username FROM users').all() as Row[];
+  const update = db.prepare('UPDATE users SET username = ? WHERE id = ?');
+  for (const row of rows) {
+    const current = String(row.username ?? '').trim().toLowerCase();
+    if (current) {
+      taken.add(current);
+      continue;
+    }
+    const base = usernameSeed(String(row.email));
+    let candidate = base;
+    let n = 0;
+    while (taken.has(candidate)) {
+      n += 1;
+      const suffix = String(n);
+      candidate = `${base.slice(0, Math.max(1, 24 - suffix.length))}${suffix}`;
+    }
+    taken.add(candidate);
+    update.run(candidate, Number(row.id));
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL AND username != ''`);
+}
+
+export function ensurePersonalWorkspace(userId: number): number {
+  const existing = db
+    .prepare('SELECT id FROM workspaces WHERE owner_id = ? AND personal = 1')
+    .get(userId) as Row | undefined;
+  if (existing) return Number(existing.id);
+  const info = db
+    .prepare('INSERT INTO workspaces (name, owner_id, personal, created_at) VALUES (?,?,1,?)')
+    .run('Personnel', userId, now());
+  const id = Number(info.lastInsertRowid);
+  db.prepare('INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?,?,?,?)').run(
+    id,
+    userId,
+    'owner',
+    now(),
+  );
+  return id;
+}
+
+function migrateWorkspaces(): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT    NOT NULL,
+      owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      personal   INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT    NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS workspace_members (
+      workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role         TEXT    NOT NULL DEFAULT 'member',
+      joined_at    TEXT    NOT NULL,
+      PRIMARY KEY (workspace_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS workspace_invites (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id  INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      email         TEXT    NOT NULL,
+      from_user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status        TEXT    NOT NULL DEFAULT 'pending',
+      created_at    TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_invites_email ON workspace_invites(email, status);
+  `);
+  addColumn('workspaces', 'auto_named', 'INTEGER NOT NULL DEFAULT 0');
+
+  const users = db.prepare('SELECT id FROM users').all() as Row[];
+  for (const user of users) ensurePersonalWorkspace(Number(user.id));
+
+  addColumn('leads', 'workspace_id', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('searches', 'workspace_id', 'INTEGER NOT NULL DEFAULT 0');
+
+  db.exec(`
+    UPDATE leads SET workspace_id = (
+      SELECT w.id FROM workspaces w WHERE w.owner_id = leads.user_id AND w.personal = 1 LIMIT 1
+    ) WHERE workspace_id = 0 AND user_id != 0
+  `);
+  db.exec(`
+    UPDATE searches SET workspace_id = (
+      SELECT w.id FROM workspaces w WHERE w.owner_id = searches.user_id AND w.personal = 1 LIMIT 1
+    ) WHERE workspace_id = 0 AND user_id != 0
+  `);
+
+  const schema = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'leads'`).get() as
+    | { sql: string }
+    | undefined;
+  if (/UNIQUE\s*\(\s*user_id\s*,\s*place_key\s*\)/i.test(schema?.sql ?? '')) {
+    rebuildLeadsForWorkspaces();
+  } else {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_workspace_place ON leads(workspace_id, place_key)');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_leads_workspace ON leads(workspace_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_searches_workspace ON searches(workspace_id)');
+}
+
+function rebuildLeadsForWorkspaces(): void {
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec(`
+    CREATE TABLE leads_v3 (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id      INTEGER NOT NULL DEFAULT 0,
+      workspace_id INTEGER NOT NULL DEFAULT 0,
+      place_key    TEXT    NOT NULL,
+      name         TEXT    NOT NULL,
+      category     TEXT,
+      address      TEXT,
+      phone        TEXT,
+      website      TEXT,
+      website_kind TEXT    NOT NULL DEFAULT 'aucun',
+      rating       REAL,
+      review_count INTEGER,
+      maps_url     TEXT    NOT NULL,
+      lat          REAL,
+      lng          REAL,
+      city         TEXT    NOT NULL,
+      domain       TEXT    NOT NULL,
+      status       TEXT    NOT NULL DEFAULT 'nouveau',
+      notes        TEXT,
+      seen_count   INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT    NOT NULL,
+      updated_at   TEXT    NOT NULL,
+      UNIQUE (workspace_id, place_key)
+    );
+
+    INSERT INTO leads_v3 (
+      id, user_id, workspace_id, place_key, name, category, address, phone, website, website_kind,
+      rating, review_count, maps_url, lat, lng, city, domain, status, notes, seen_count,
+      created_at, updated_at
+    )
+    SELECT
+      id, COALESCE(user_id, 0), COALESCE(workspace_id, 0), place_key, name, category, address, phone, website, website_kind,
+      rating, review_count, maps_url, lat, lng, city, domain, status, notes, seen_count,
+      created_at, updated_at
+    FROM leads;
+
+    DROP TABLE leads;
+    ALTER TABLE leads_v3 RENAME TO leads;
+
+    CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+    CREATE INDEX IF NOT EXISTS idx_leads_city   ON leads(city);
+    CREATE INDEX IF NOT EXISTS idx_leads_user   ON leads(user_id);
+    CREATE INDEX IF NOT EXISTS idx_leads_workspace ON leads(workspace_id);
+  `);
+  db.exec('PRAGMA foreign_keys = ON');
 }
 
 /** La clé Google n’est unique que par compte, pas sur toute l’instance. */
@@ -197,10 +369,6 @@ function rebuildLeadsForTenancy(): void {
   db.exec('PRAGMA foreign_keys = ON');
 }
 
-const now = () => new Date().toISOString();
-
-type Row = Record<string, unknown>;
-
 function toLead(r: Row): Lead {
   return {
     id: r.id as number,
@@ -219,6 +387,9 @@ function toLead(r: Row): Lead {
     city: r.city as string,
     domain: r.domain as string,
     status: r.status as LeadStatus,
+    dirigeant: (r.dirigeant as string) || null,
+    dirigeantSource: (r.dirigeant_source as string) || null,
+    dirigeantStatus: (r.dirigeant_status as Lead['dirigeantStatus']) || ((r.dirigeant as string) ? 'found' : null),
     notes: (r.notes as string) ?? null,
     seenCount: r.seen_count as number,
     createdAt: r.created_at as string,
@@ -240,6 +411,7 @@ function toSearch(r: Row): SearchRecord {
   return {
     id: r.id as number,
     userId: (r.user_id as number) ?? 0,
+    workspaceId: (r.workspace_id as number) ?? 0,
     city: r.city as string,
     domains: JSON.parse(r.domains as string) as string[],
     options: JSON.parse(r.options as string) as SearchOptions,
@@ -258,6 +430,7 @@ function toSearch(r: Row): SearchRecord {
 /* ------------------------------------------------------------------ leads */
 
 export interface LeadInput {
+  workspaceId: number;
   userId: number;
   placeKey: string;
   name: string;
@@ -281,8 +454,8 @@ export interface LeadInput {
  */
 export function upsertLead(input: LeadInput): { lead: Lead; isNew: boolean } {
   const existing = db
-    .prepare('SELECT * FROM leads WHERE place_key = ? AND user_id = ?')
-    .get(input.placeKey, input.userId) as Row | undefined;
+    .prepare('SELECT * FROM leads WHERE place_key = ? AND workspace_id = ?')
+    .get(input.placeKey, input.workspaceId) as Row | undefined;
 
   if (existing) {
     db.prepare(
@@ -322,12 +495,13 @@ export function upsertLead(input: LeadInput): { lead: Lead; isNew: boolean } {
   const info = db
     .prepare(
       `INSERT INTO leads
-        (user_id, place_key, name, category, address, phone, website, website_kind, rating, review_count,
+        (user_id, workspace_id, place_key, name, category, address, phone, website, website_kind, rating, review_count,
          maps_url, lat, lng, city, domain, status, seen_count, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'nouveau',1,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'nouveau',1,?,?)`,
     )
     .run(
       input.userId,
+      input.workspaceId,
       input.placeKey,
       input.name,
       input.category,
@@ -350,8 +524,25 @@ export function upsertLead(input: LeadInput): { lead: Lead; isNew: boolean } {
   return { lead: toLead(lead), isNew: true };
 }
 
+export function setLeadDirigeant(
+  id: number,
+  hit: { name: string | null; source: string | null; status: 'found' | 'missing' },
+): Lead | null {
+  const existing = db.prepare('SELECT id FROM leads WHERE id = ?').get(id) as Row | undefined;
+  if (!existing) return null;
+  db.prepare('UPDATE leads SET dirigeant = ?, dirigeant_source = ?, dirigeant_status = ?, updated_at = ? WHERE id = ?').run(
+    hit.name,
+    hit.source,
+    hit.status,
+    now(),
+    id,
+  );
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id) as Row;
+  return toLead(lead);
+}
+
 export interface LeadFilters {
-  userId: number;
+  workspaceId: number;
   status?: LeadStatus;
   city?: string;
   domain?: string;
@@ -366,8 +557,8 @@ function likeContains(value: string): string {
 }
 
 export function listLeads(f: LeadFilters): Lead[] {
-  const where: string[] = ['l.user_id = ?'];
-  const params: unknown[] = [f.userId];
+  const where: string[] = ['l.workspace_id = ?'];
+  const params: unknown[] = [f.workspaceId];
 
   if (f.status) {
     where.push('l.status = ?');
@@ -385,16 +576,16 @@ export function listLeads(f: LeadFilters): Lead[] {
   if (f.website === 'avec') where.push("l.website_kind = 'site'");
   if (f.query) {
     where.push(
-      "(l.name LIKE ? ESCAPE '\\' OR l.address LIKE ? ESCAPE '\\' OR l.phone LIKE ? ESCAPE '\\' OR l.category LIKE ? ESCAPE '\\')",
+      "(l.name LIKE ? ESCAPE '\\' OR l.address LIKE ? ESCAPE '\\' OR l.phone LIKE ? ESCAPE '\\' OR l.category LIKE ? ESCAPE '\\' OR l.dirigeant LIKE ? ESCAPE '\\')",
     );
     const q = likeContains(f.query);
-    params.push(q, q, q, q);
+    params.push(q, q, q, q, q);
   }
   if (f.searchId) {
     where.push(
-      'l.id IN (SELECT sl.lead_id FROM search_leads sl JOIN searches s ON s.id = sl.search_id WHERE sl.search_id = ? AND s.user_id = ?)',
+      'l.id IN (SELECT sl.lead_id FROM search_leads sl JOIN searches s ON s.id = sl.search_id WHERE sl.search_id = ? AND s.workspace_id = ?)',
     );
-    params.push(f.searchId, f.userId);
+    params.push(f.searchId, f.workspaceId);
   }
 
   const sql = `SELECT l.* FROM leads l
@@ -404,76 +595,84 @@ export function listLeads(f: LeadFilters): Lead[] {
   return (db.prepare(sql).all(...(params as never[])) as Row[]).map(toLead);
 }
 
-export function getLead(id: number, userId: number): Lead | null {
-  const r = db.prepare('SELECT * FROM leads WHERE id = ? AND user_id = ?').get(id, userId) as Row | undefined;
+export function getLead(id: number, workspaceId: number): Lead | null {
+  const r = db.prepare('SELECT * FROM leads WHERE id = ? AND workspace_id = ?').get(id, workspaceId) as Row | undefined;
   return r ? toLead(r) : null;
 }
 
-export function setLeadStatus(id: number, status: LeadStatus, userId: number): Lead | null {
-  db.prepare('UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(status, now(), id, userId);
-  return getLead(id, userId);
+export function setLeadStatus(id: number, status: LeadStatus, workspaceId: number): Lead | null {
+  db.prepare('UPDATE leads SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ?').run(status, now(), id, workspaceId);
+  return getLead(id, workspaceId);
 }
 
-export function setLeadStatusBulk(ids: number[], status: LeadStatus, userId: number): number {
+export function setLeadStatusBulk(ids: number[], status: LeadStatus, workspaceId: number): number {
   if (!ids.length) return 0;
   const placeholders = ids.map(() => '?').join(',');
   const info = db
-    .prepare(`UPDATE leads SET status = ?, updated_at = ? WHERE user_id = ? AND id IN (${placeholders})`)
-    .run(status, now(), userId, ...(ids as never[]));
+    .prepare(`UPDATE leads SET status = ?, updated_at = ? WHERE workspace_id = ? AND id IN (${placeholders})`)
+    .run(status, now(), workspaceId, ...(ids as never[]));
   return Number(info.changes);
 }
 
-export function setLeadNotes(id: number, notes: string, userId: number): Lead | null {
-  db.prepare('UPDATE leads SET notes = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(notes, now(), id, userId);
-  return getLead(id, userId);
+export function setLeadNotes(id: number, notes: string, workspaceId: number): Lead | null {
+  db.prepare('UPDATE leads SET notes = ?, updated_at = ? WHERE id = ? AND workspace_id = ?').run(notes, now(), id, workspaceId);
+  return getLead(id, workspaceId);
 }
 
-export function deleteLead(id: number, userId: number): boolean {
-  const info = db.prepare('DELETE FROM leads WHERE id = ? AND user_id = ?').run(id, userId);
+export function deleteLead(id: number, workspaceId: number): boolean {
+  const info = db.prepare('DELETE FROM leads WHERE id = ? AND workspace_id = ?').run(id, workspaceId);
   return Number(info.changes) > 0;
 }
 
-export function deleteLeadsBulk(ids: number[], userId: number): number {
+export function deleteLeadsBulk(ids: number[], workspaceId: number): number {
   if (!ids.length) return 0;
   const placeholders = ids.map(() => '?').join(',');
   const info = db
-    .prepare(`DELETE FROM leads WHERE user_id = ? AND id IN (${placeholders})`)
-    .run(userId, ...(ids as never[]));
+    .prepare(`DELETE FROM leads WHERE workspace_id = ? AND id IN (${placeholders})`)
+    .run(workspaceId, ...(ids as never[]));
   return Number(info.changes);
 }
 
 /** Fiches déjà traitées : on ne veut plus les revoir dans les résultats de recherche. */
-export function handledPlaceKeys(userId: number): Set<string> {
+export function handledPlaceKeys(workspaceId: number): Set<string> {
   const rows = db
-    .prepare(`SELECT place_key FROM leads WHERE user_id = ? AND status IN ('termine','perdu')`)
-    .all(userId) as Row[];
+    .prepare(`SELECT place_key FROM leads WHERE workspace_id = ? AND status IN ('termine','perdu')`)
+    .all(workspaceId) as Row[];
   return new Set(rows.map((r) => r.place_key as string));
 }
 
-export function knownCities(userId: number): string[] {
-  const rows = db.prepare('SELECT DISTINCT city FROM leads WHERE user_id = ? ORDER BY city').all(userId) as Row[];
+export function knownCities(workspaceId: number): string[] {
+  const rows = db.prepare('SELECT DISTINCT city FROM leads WHERE workspace_id = ? ORDER BY city').all(workspaceId) as Row[];
   return rows.map((r) => r.city as string);
 }
 
-export function knownDomains(userId: number): string[] {
-  const rows = db.prepare('SELECT DISTINCT domain FROM leads WHERE user_id = ? ORDER BY domain').all(userId) as Row[];
+export function knownDomains(workspaceId: number): string[] {
+  const rows = db.prepare('SELECT DISTINCT domain FROM leads WHERE workspace_id = ? ORDER BY domain').all(workspaceId) as Row[];
   return rows.map((r) => r.domain as string);
 }
 
 /* --------------------------------------------------------------- searches */
 
-export function createSearch(userId: number, city: string, domains: string[], options: SearchOptions): SearchRecord {
+export function createSearch(
+  workspaceId: number,
+  userId: number,
+  city: string,
+  domains: string[],
+  options: SearchOptions,
+): SearchRecord {
   const info = db
-    .prepare('INSERT INTO searches (user_id, city, domains, options, status, created_at) VALUES (?,?,?,?,?,?)')
-    .run(userId, city, JSON.stringify(domains), JSON.stringify(options), 'en_cours', now());
+    .prepare(
+      'INSERT INTO searches (user_id, workspace_id, city, domains, options, status, created_at) VALUES (?,?,?,?,?,?,?)',
+    )
+    .run(userId, workspaceId, city, JSON.stringify(domains), JSON.stringify(options), 'en_cours', now());
   return getSearch(Number(info.lastInsertRowid))!;
 }
 
-export function getSearch(id: number, userId?: number): SearchRecord | null {
+export function getSearch(id: number, workspaceId?: number): SearchRecord | null {
   const r = (
-    userId == null
+    workspaceId == null
       ? db.prepare('SELECT * FROM searches WHERE id = ?').get(id)
-      : db.prepare('SELECT * FROM searches WHERE id = ? AND user_id = ?').get(id, userId)
+      : db.prepare('SELECT * FROM searches WHERE id = ? AND workspace_id = ?').get(id, workspaceId)
   ) as Row | undefined;
   return r ? toSearch(r) : null;
 }
@@ -526,14 +725,14 @@ export function linkSearchLead(searchId: number, leadId: number): void {
   db.prepare('INSERT OR IGNORE INTO search_leads (search_id, lead_id) VALUES (?,?)').run(searchId, leadId);
 }
 
-export function listSearches(userId: number, limit = 100): SearchRecord[] {
+export function listSearches(workspaceId: number, limit = 100): SearchRecord[] {
   return (
-    db.prepare('SELECT * FROM searches WHERE user_id = ? ORDER BY id DESC LIMIT ?').all(userId, limit) as Row[]
+    db.prepare('SELECT * FROM searches WHERE workspace_id = ? ORDER BY id DESC LIMIT ?').all(workspaceId, limit) as Row[]
   ).map(toSearch);
 }
 
-export function deleteSearch(id: number, userId: number): boolean {
-  const info = db.prepare('DELETE FROM searches WHERE id = ? AND user_id = ?').run(id, userId);
+export function deleteSearch(id: number, workspaceId: number): boolean {
+  const info = db.prepare('DELETE FROM searches WHERE id = ? AND workspace_id = ?').run(id, workspaceId);
   return Number(info.changes) > 0;
 }
 
@@ -542,15 +741,15 @@ export function markStaleSearchesCancelled(): void {
   db.prepare(`UPDATE searches SET status = 'annule', finished_at = ? WHERE status = 'en_cours'`).run(now());
 }
 
-export function stats(userId: number): Stats {
-  const rows = db.prepare('SELECT status, COUNT(*) AS n FROM leads WHERE user_id = ? GROUP BY status').all(userId) as Row[];
+export function stats(workspaceId: number): Stats {
+  const rows = db.prepare('SELECT status, COUNT(*) AS n FROM leads WHERE workspace_id = ? GROUP BY status').all(workspaceId) as Row[];
   const base: Stats = { nouveau: 0, favori: 0, termine: 0, perdu: 0, total: 0, searches: 0 };
   for (const r of rows) {
     const key = r.status as LeadStatus;
     base[key] = r.n as number;
     base.total += r.n as number;
   }
-  const s = db.prepare('SELECT COUNT(*) AS n FROM searches WHERE user_id = ?').get(userId) as Row;
+  const s = db.prepare('SELECT COUNT(*) AS n FROM searches WHERE workspace_id = ?').get(workspaceId) as Row;
   base.searches = s.n as number;
   return base;
 }

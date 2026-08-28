@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { loadStripe } from '@stripe/stripe-js';
 import type { BillingPlan, PlanId } from '../../shared/types';
+import { BrandMark } from '../components/BrandMark';
 import { api } from '../api';
 import { useAuth } from '../auth';
 
@@ -75,9 +76,9 @@ export function CheckoutPage() {
   }, [refresh]);
 
   return (
-    <div className="mx-auto min-h-screen max-w-3xl px-4 py-10">
+    <div className="mx-auto min-h-screen max-w-3xl px-3 py-8 sm:px-4 sm:py-10">
       <Link to="/" className="mb-8 inline-flex">
-        <img src="/prospy.png" alt="Prospy" className="h-10 w-auto object-contain" />
+        <BrandMark alt="Prospy" className="h-10 w-10" />
       </Link>
       <h1 className="text-2xl font-semibold tracking-tight">Abonnement</h1>
       <p className="mt-2 max-w-xl text-sm text-muted">

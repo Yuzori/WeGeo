@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import {
   createContext,
   useCallback,
@@ -9,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Check, Info, Loader2, Moon, Sun, TriangleAlert, X } from 'lucide-react';
+import { useI18n } from '../i18n';
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -101,12 +103,12 @@ const TONES: Record<Tone, { on: string; off: string }> = {
 };
 
 const MOTIONS: Record<Motion, string> = {
-  pop: '',
-  tilt: '',
-  spin: '',
-  shake: '',
-  fly: '',
-  ring: '',
+  pop: 'icon-btn icon-btn-pop',
+  tilt: 'icon-btn icon-btn-tilt',
+  spin: 'icon-btn icon-btn-spin',
+  shake: 'icon-btn icon-btn-shake',
+  fly: 'icon-btn icon-btn-fly',
+  ring: 'icon-btn icon-btn-ring',
 };
 
 interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -133,7 +135,7 @@ export function IconButton({
       aria-pressed={active}
       className={cx(
         'inline-flex size-8 shrink-0 items-center justify-center rounded-md border',
-        'transition-colors duration-150',
+        'transition-[color,background-color,border-color,transform] duration-150 hover:-translate-y-px',
         MOTIONS[motion],
         active ? t.on : t.off,
         className,
@@ -225,6 +227,7 @@ export function applyStoredTheme(): void {
 }
 
 export function ThemeToggle({ compact, className }: { compact?: boolean; className?: string }) {
+  const { m } = useI18n();
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
 
   useEffect(() => {
@@ -250,8 +253,8 @@ export function ThemeToggle({ compact, className }: { compact?: boolean; classNa
       <button
         type="button"
         onClick={toggle}
-        title={dark ? 'Passer en mode jour' : 'Passer en mode nuit'}
-        aria-label={dark ? 'Passer en mode jour' : 'Passer en mode nuit'}
+        title={dark ? m.chrome.toDay : m.chrome.toNight}
+        aria-label={dark ? m.chrome.toDay : m.chrome.toNight}
         className={cx(
           'inline-flex size-[1.85rem] items-center justify-center rounded-full border border-[var(--lp-line)] bg-[color-mix(in_oklab,var(--lp-surface)_70%,transparent)] text-ink',
           className,
@@ -266,8 +269,8 @@ export function ThemeToggle({ compact, className }: { compact?: boolean; classNa
     <button
       type="button"
       onClick={toggle}
-      title={dark ? 'Passer en mode jour' : 'Passer en mode nuit'}
-      aria-label={dark ? 'Passer en mode jour' : 'Passer en mode nuit'}
+      title={dark ? m.chrome.toDay : m.chrome.toNight}
+      aria-label={dark ? m.chrome.toDay : m.chrome.toNight}
       className={cx(
         'group relative inline-flex h-7 items-center gap-1 rounded-md border border-rule px-1 font-mono text-[10px] tracking-widest uppercase',
         className,
@@ -279,7 +282,7 @@ export function ThemeToggle({ compact, className }: { compact?: boolean; classNa
           dark ? 'text-faint' : 'bg-lime text-on-lime',
         )}
       >
-        <Sun className="size-3" /> jour
+        <Sun className="size-3" /> {m.chrome.day}
       </span>
       <span
         className={cx(
@@ -287,7 +290,7 @@ export function ThemeToggle({ compact, className }: { compact?: boolean; classNa
           dark ? 'bg-lime text-on-lime' : 'text-faint',
         )}
       >
-        <Moon className="size-3" /> nuit
+        <Moon className="size-3" /> {m.chrome.night}
       </span>
     </button>
   );
@@ -407,8 +410,8 @@ export function Modal({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
+  return createPortal(
+    <div className="fixed inset-0 z-[2000] flex items-end justify-center sm:items-center sm:p-6">
       <div className="absolute inset-0 bg-[hsl(var(--shade)/0.5)] backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         role="dialog"
@@ -422,7 +425,7 @@ export function Modal({
       >
         <header className="flex items-start justify-between gap-4 border-b border-rule px-5 py-3.5">
           <div className="min-w-0">
-            <h2 className="truncate text-[15px] font-semibold">{title}</h2>
+            <h2 className="text-[15px] leading-snug font-semibold break-words">{title}</h2>
             {subtitle && <p className="legend mt-1">{subtitle}</p>}
           </div>
           <IconButton label="Fermer" onClick={onClose}>
@@ -432,7 +435,8 @@ export function Modal({
         <div className="min-h-0 flex-1 overflow-auto">{children}</div>
         {footer && <footer className="border-t border-rule bg-card-2 px-5 py-3">{footer}</footer>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

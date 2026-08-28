@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
   Check,
-  ChevronDown,
   Globe,
   Lock,
   Map,
@@ -14,58 +13,84 @@ import {
   Shield,
   Star,
   Table2,
+  UserRound,
   X,
 } from 'lucide-react';
 import type { BillingPlan, Lead } from '../../shared/types';
 import { api } from '../api';
+import { useAuth } from '../auth';
 import { GeoMap } from '../components/GeoMap';
+import { LangSwitch } from '../components/LangSwitch';
 import { LogoFlight } from '../components/LogoFlight';
+import { SettingsLink } from '../components/SettingsLink';
+import { UserAvatar } from '../components/UserAvatar';
 import { ThemeToggle, cx } from '../components/ui';
 import { useI18n, type Locale } from '../i18n';
+import { TIER_COLORS, hueOf, initials, potential } from '../lib/lead';
+import { relocateLeads, useVisitorPlace } from '../lib/place';
 
 const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'starter',
     name: 'Starter',
     tagline: 'Pour lancer les premières tournées.',
-    amountLabel: 'Tarif au paiement',
+    amountLabel: '19 €',
     interval: 'month',
     cta: 'Choisir Starter',
     priceConfigured: false,
     features: [
-      'Recherche Google Maps des commerces sans site',
-      'Pipeline À trier / Favoris / Signé / Non conclu',
-      'Notes d’appel et export CSV / Excel',
+      'Relevé Google Maps des commerces sans site',
+      'Pipeline d’appels : trier, appeler, classer',
+      'Export CSV / Excel',
+      '1 compte, 1 session personnelle',
+      '2 métiers et 50 entreprises par relevé',
+    ],
+    locked: [
+      'Nom du dirigeant',
+      'Invitations d’équipe',
+      'Quadrillage des grandes villes',
+      'Tous les réglages de recherche',
+      'Carte, score et session d’appels clavier',
     ],
   },
   {
     id: 'pro',
     name: 'Pro',
     tagline: 'Pour appeler et conclure au quotidien.',
-    amountLabel: 'Tarif au paiement',
+    amountLabel: '49 €',
     interval: 'month',
     highlighted: true,
     cta: 'Choisir Pro',
     priceConfigured: false,
     features: [
       'Tout Starter',
-      'Score de potentiel et carte de France',
-      'Session d’appels au clavier',
-      'Reprise d’un relevé interrompu',
+      'Nom du dirigeant (SIRENE) et lien source',
+      '8 métiers et 250 entreprises par relevé',
+      'Quadrillage 2 × 2',
+      'Inviter 2 personnes',
+      'Carte, score, session d’appels, Google Sheets',
+      'Réglages de recherche étendus',
+    ],
+    locked: [
+      'Quadrillage large (jusqu’à 5 × 5)',
+      'Volume de relevé illimité',
+      'Plus de 3 personnes par session',
     ],
   },
   {
     id: 'agence',
     name: 'Agence',
     tagline: 'Pour enchaîner les villes et les métiers.',
-    amountLabel: 'Tarif au paiement',
+    amountLabel: '89 €',
     interval: 'month',
     cta: 'Choisir Agence',
     priceConfigured: false,
     features: [
       'Tout Pro',
-      'Quadrillage des grandes villes',
-      'Lots de métiers et historique complet',
+      '15 métiers et 1 000 entreprises par relevé',
+      'Tous les réglages, quadrillage jusqu’à 5 × 5',
+      'Jusqu’à 10 personnes par session',
+      'Historique complet et actions groupées',
     ],
   },
 ];
@@ -108,6 +133,7 @@ const RADAR_RINGS = [
 
 function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; className?: string }) {
   const [src, setSrc] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -126,7 +152,7 @@ function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; cla
   }, [name]);
 
   return (
-    <div ref={host} className={className} aria-hidden>
+    <div ref={host} className={cx(className, !ready && 'is-empty')} aria-hidden>
       {src ? (
         <img
           src={src}
@@ -135,9 +161,19 @@ function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; cla
           height={800}
           loading="lazy"
           decoding="async"
-          onError={() => setSrc(null)}
+          onLoad={() => setReady(true)}
+          onError={() => {
+            setSrc(null);
+            setReady(false);
+          }}
         />
       ) : null}
+      {ready ? null : (
+        <span className="lp-photo-wait">
+          <span className="lp-photo-x" />
+          <span className="lp-photo-file">{name}.jpg</span>
+        </span>
+      )}
     </div>
   );
 }
@@ -194,13 +230,11 @@ function RadarField({ variant = 'hero' }: { variant?: 'hero' | 'cta' }) {
 
 function WindowFrame({
   label,
-  lit = 0,
   children,
   className,
   mascot = false,
 }: {
   label: string;
-  lit?: 0 | 1 | 2;
   children: ReactNode;
   className?: string;
   mascot?: boolean | 'hero' | 'product';
@@ -208,197 +242,32 @@ function WindowFrame({
   return (
     <div
       className={cx('lp-frame', className)}
-      style={{ ['--lit' as string]: lit }}
       {...(mascot ? { 'data-mascot': mascot === true ? 'window' : mascot } : {})}
     >
-      <div className="flex items-center gap-2 border-b border-[var(--lp-line)] px-3.5 py-2.5">
-        {[0, 1, 2].map((index) => (
-          <span key={index} className={cx('lp-dot', lit === index && 'lp-dot-on')} />
-        ))}
-        <span className="legend ml-1.5">{label}</span>
-      </div>
+      <p className="legend px-4 pt-3.5">{label}</p>
       {children}
     </div>
   );
 }
 
-function LangSwitch({ compact }: { compact?: boolean }) {
-  const { locale, setLocale, m } = useI18n();
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const close = (event: MouseEvent) => {
-      if (!box.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
-
+function GlyphLine({ text, className }: { text: string; className?: string }) {
+  const parts = text.split(/(\s+)/);
   return (
-    <div className="relative" ref={box}>
-      <button
-        type="button"
-        className={cx('lp-lang', compact && 'lp-lang-compact')}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label={m.nav.lang}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Globe className="size-3.5" />
-        {locale.toUpperCase()}
-        {!compact && <ChevronDown className="size-3 opacity-70" />}
-      </button>
-      {open && (
-        <div className="lp-lang-menu" role="listbox">
-          {(
-            [
-              ['fr', 'FR — Français'],
-              ['en', 'EN — English'],
-            ] as const
-          ).map(([code, label]) => (
-            <button
-              key={code}
-              type="button"
-              role="option"
-              aria-current={locale === code}
-              onClick={() => {
-                setLocale(code);
-                setOpen(false);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+    <span className={cx('lp-split', className)}>
+      {parts.map((part, i) =>
+        /^\s+$/.test(part) ? (
+          <span key={i}>{' '}</span>
+        ) : (
+          <span key={i} className="lp-split-word">
+            {[...part].map((ch, j) => (
+              <span key={j} className="lp-glyph" style={{ '--d': `${Math.min(i, 8) * 0.03 + j * 0.016}s` } as CSSProperties}>
+                {ch}
+              </span>
+            ))}
+          </span>
+        ),
       )}
-    </div>
-  );
-}
-
-function MockLead({
-  initials,
-  name,
-  trade,
-  city,
-  phone,
-  score,
-  starred,
-}: {
-  initials: string;
-  name: string;
-  trade: string;
-  city: string;
-  phone: string;
-  score: number;
-  starred?: boolean;
-}) {
-  const tone =
-    score >= 75 ? 'text-score-high' : score >= 55 ? 'text-score-good' : score >= 35 ? 'text-score-mid' : 'text-score-low';
-  return (
-    <div className="lp-lead lp-lead-row flex items-center gap-3 rounded-[10px] border px-3 py-2.5">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--lp-lime)_28%,var(--card-2))] font-mono text-[11px] font-semibold">
-        {initials}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <p className="truncate text-sm font-semibold">{name}</p>
-          {starred && <Star className="size-3 fill-[var(--lp-lime)] text-[var(--lp-lime)]" />}
-        </div>
-        <p className="truncate text-[11px] text-muted">
-          {trade} · {city}
-        </p>
-      </div>
-      <div className="hidden min-[480px]:block text-right">
-        <p className="font-mono text-[10px] text-faint">{phone}</p>
-        <p className={cx('lp-score mt-0.5', tone)}>{score}</p>
-      </div>
-    </div>
-  );
-}
-
-function MockLeadList() {
-  const { m } = useI18n();
-  return (
-    <>
-      <div className="flex items-center justify-between px-0.5">
-        <p className="legend">{m.mock.noSite}</p>
-        <span className="h-1.5 w-24 overflow-hidden rounded-full bg-rule">
-          <span className="block h-full w-2/3 rounded-full bg-[var(--lp-lime)]" />
-        </span>
-      </div>
-      <MockLead initials="AM" name="Atelier Moreau" trade="Menuisier" city="Lyon 3e" phone="04 78 12 40 18" score={82} />
-      <MockLead initials="CP" name="Chez Paulette" trade="Fleuriste" city="Villeurbanne" phone="04 72 04 91 33" score={71} starred />
-      <MockLead initials="GP" name="Garage du Parc" trade="Automobile" city="Lyon 6e" phone="04 78 89 21 07" score={64} />
-    </>
-  );
-}
-
-/** IMAGE PLACEHOLDER — /public/landing/search.jpg or src/assets/landing/search.jpg */
-function MockSearch({ compact }: { compact?: boolean }) {
-  const { m } = useI18n();
-  if (compact) {
-    return (
-      <div className="lp-mock space-y-2 p-3">
-        <MockLeadList />
-      </div>
-    );
-  }
-
-  return (
-    <div className="lp-mock grid min-h-[280px] gap-3 p-3 min-[900px]:grid-cols-[0.9fr_1.1fr]">
-      <div className="space-y-2 rounded-[10px] border border-[color-mix(in_oklab,var(--lp-lime)_20%,var(--lp-line))] bg-[color-mix(in_oklab,var(--lp-lime)_7%,var(--lp-surface))] p-3">
-        <p className="legend">{m.mock.newSearch}</p>
-        <div className="rounded-md border border-[var(--lp-line)] bg-[var(--lp-bg)] px-2.5 py-1.5 font-mono text-[11px]">Lyon</div>
-        <div className="flex flex-wrap gap-1">
-          {['coiffeur', 'plombier', 'garage'].map((d) => (
-            <span key={d} className="rounded-full bg-[color-mix(in_oklab,var(--lp-lime)_22%,transparent)] px-2 py-0.5 font-mono text-[10px]">
-              {d}
-            </span>
-          ))}
-        </div>
-        <div className="h-8 rounded-full bg-[var(--lp-lime)] text-center font-[family-name:var(--font-display)] text-[12px] leading-8 font-bold text-[var(--lp-ink-on-lime)]">
-          {m.mock.runSurvey}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <MockLeadList />
-      </div>
-    </div>
-  );
-}
-
-/** IMAGE PLACEHOLDER — /public/landing/pipeline.jpg */
-function MockPipeline() {
-  const { m } = useI18n();
-  return (
-    <div className="lp-mock space-y-2 p-3">
-      <p className="legend">{m.mock.favorites}</p>
-      <MockLead initials="CP" name="Chez Paulette" trade="Fleuriste" city="Villeurbanne" phone="04 72 04 91 33" score={71} starred />
-      <MockLead initials="BL" name="Boulangerie Lamy" trade="Boulangerie" city="Lyon 7e" phone="04 78 61 02 44" score={68} starred />
-      <MockLead initials="RM" name="Toiture Martin" trade="Couvreur" city="Caluire" phone="04 72 98 15 60" score={77} starred />
-    </div>
-  );
-}
-
-/** IMAGE PLACEHOLDER — /public/landing/calls.jpg */
-function MockCall() {
-  const { m } = useI18n();
-  return (
-    <div className="lp-mock flex min-h-[220px] flex-col items-center justify-center gap-3 p-6 text-center">
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-[color-mix(in_oklab,var(--lp-lime)_28%,var(--card-2))] font-mono text-lg font-semibold">
-        CP
-      </span>
-      <div>
-        <p className="font-[family-name:var(--font-display)] text-xl font-extrabold">Chez Paulette</p>
-        <p className="mt-0.5 text-sm text-muted">Fleuriste · Villeurbanne · {m.mock.noSiteTag}</p>
-      </div>
-      <p className="font-mono text-lg tracking-wide">04 72 04 91 33</p>
-      <div className="flex gap-2">
-        <span className="rounded-full bg-[var(--lp-lime)] px-3 py-1 text-[11px] font-bold text-[var(--lp-ink-on-lime)]">{m.mock.signed}</span>
-        <span className="rounded-full border border-[var(--lp-line)] bg-[var(--lp-surface)] px-3 py-1 text-[11px]">{m.mock.notClosed}</span>
-      </div>
-    </div>
+    </span>
   );
 }
 
@@ -413,6 +282,7 @@ function demoLead(
   lng: number,
   rating: number,
   reviewCount: number,
+  dirigeant?: string,
 ): Lead {
   return {
     id,
@@ -431,6 +301,11 @@ function demoLead(
     city,
     domain,
     status: 'nouveau',
+    dirigeant: dirigeant ?? null,
+    dirigeantSource: dirigeant
+      ? `https://annuaire-entreprises.data.gouv.fr/rechercher?terme=${encodeURIComponent(name)}`
+      : null,
+    dirigeantStatus: dirigeant ? 'found' : null,
     notes: null,
     createdAt: '',
     updatedAt: '',
@@ -439,20 +314,105 @@ function demoLead(
 }
 
 const DEMO_MAP_LEADS: Lead[] = [
-  demoLead(1, 'Atelier Moreau', 'Menuisier', 'Lyon 3e', 'menuisier', '04 78 12 40 18', 45.7518, 4.8426, 4.7, 186),
-  demoLead(2, 'Chez Paulette', 'Fleuriste', 'Villeurbanne', 'fleuriste', '04 72 04 91 33', 45.7662, 4.8798, 4.5, 92),
-  demoLead(3, 'Garage du Parc', 'Automobile', 'Lyon 6e', 'garage', '04 78 89 21 07', 45.7694, 4.8504, 4.3, 54),
-  demoLead(4, 'Boulangerie Lamy', 'Boulangerie', 'Lyon 7e', 'boulangerie', '04 78 61 02 44', 45.7489, 4.8411, 4.6, 74),
-  demoLead(5, 'Toiture Martin', 'Couvreur', 'Caluire', 'couvreur', '04 72 98 15 60', 45.7856, 4.8472, 4.8, 41),
-  demoLead(6, 'Salon Rive Gauche', 'Coiffeur', 'Lyon 2e', 'coiffeur', '04 78 42 11 09', 45.7576, 4.8317, 4.4, 128),
-  demoLead(7, 'Plomberie Roux', 'Plombier', 'Lyon 8e', 'plombier', '04 78 74 33 20', 45.7348, 4.8691, 4.2, 38),
-  demoLead(8, 'Garage Guillotière', 'Automobile', 'Lyon 7e', 'garage', '04 78 72 18 44', 45.7534, 4.8429, 4.1, 29),
-  demoLead(9, 'Coiffure Bellecour', 'Coiffeur', 'Lyon 2e', 'coiffeur', '04 78 37 55 12', 45.7571, 4.8322, 4.6, 210),
-  demoLead(10, 'Fleurs des pentes', 'Fleuriste', 'Lyon 1er', 'fleuriste', '04 78 28 90 17', 45.7698, 4.8274, 4.5, 67),
+  demoLead(1, 'Atelier Moreau', 'Menuisier', 'Lyon 3e', 'menuisier', '04 78 12 40 18', 45.7518, 4.8426, 4.7, 186, 'Claire Moreau'),
+  demoLead(2, 'Chez Paulette', 'Fleuriste', 'Villeurbanne', 'fleuriste', '04 72 04 91 33', 45.7662, 4.8798, 4.5, 92, 'Paulette Marin'),
+  demoLead(3, 'Garage du Parc', 'Automobile', 'Lyon 6e', 'garage', '04 78 89 21 07', 45.7694, 4.8504, 4.3, 54, 'Henri Favier'),
+  demoLead(4, 'Boulangerie Lamy', 'Boulangerie', 'Lyon 7e', 'boulangerie', '04 78 61 02 44', 45.7489, 4.8411, 4.6, 74, 'Antoine Lamy'),
+  demoLead(5, 'Toiture Martin', 'Couvreur', 'Caluire', 'couvreur', '04 72 98 15 60', 45.7856, 4.8472, 4.8, 41, 'Luc Martin'),
+  demoLead(6, 'Salon Rive Gauche', 'Coiffeur', 'Lyon 2e', 'coiffeur', '04 78 42 11 09', 45.7576, 4.8317, 4.4, 128, 'Nadia Besse'),
+  demoLead(7, 'Plomberie Roux', 'Plombier', 'Lyon 8e', 'plombier', '04 78 74 33 20', 45.7348, 4.8691, 4.2, 38, 'Michel Roux'),
+  demoLead(8, 'Garage Guillotière', 'Automobile', 'Lyon 7e', 'garage', '04 78 72 18 44', 45.7534, 4.8429, 4.1, 29, 'Karim Haddad'),
+  demoLead(9, 'Coiffure Bellecour', 'Coiffeur', 'Lyon 2e', 'coiffeur', '04 78 37 55 12', 45.7571, 4.8322, 4.6, 210, 'Sophie Rey'),
+  demoLead(10, 'Fleurs des pentes', 'Fleuriste', 'Lyon 1er', 'fleuriste', '04 78 28 90 17', 45.7698, 4.8274, 4.5, 67, 'Élise Garnier'),
 ];
 
-function ProductMap() {
-  const [leads, setLeads] = useState<Lead[]>([]);
+function MockMark({ name }: { name: string }) {
+  const hue = hueOf(name);
+  return (
+    <span
+      className="lp-mark"
+      style={{
+        background: `linear-gradient(150deg, oklch(0.88 0.09 ${hue}), oklch(0.79 0.11 ${hue + 24}))`,
+        borderColor: `oklch(0.66 0.11 ${hue})`,
+        color: `oklch(0.28 0.07 ${hue})`,
+      }}
+      aria-hidden
+    >
+      {initials(name)}
+      <span
+        className="lp-mark-pin"
+        style={{
+          background: `oklch(0.79 0.11 ${hue + 24})`,
+          borderColor: `oklch(0.66 0.11 ${hue})`,
+        }}
+      />
+    </span>
+  );
+}
+
+function MockDeal({ lead, starred }: { lead: Lead; starred?: boolean }) {
+  const { score, tier } = potential(lead);
+  const filled = { excellent: 4, bon: 3, moyen: 2, faible: 1 }[tier];
+  const color = TIER_COLORS[tier];
+  return (
+    <article className="lp-deal">
+      <MockMark name={lead.name} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="truncate text-[15px] leading-tight font-semibold">{lead.name}</p>
+          {starred ? <Star className="size-3.5 fill-[var(--lp-lime)] text-[var(--lp-lime)]" /> : null}
+          <span className="lp-deal-tag">
+            <Globe className="size-3" />
+            {lead.websiteKind === 'aucun' ? 'aucun site' : 'site'}
+          </span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted">
+          {lead.category} · {lead.city}
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          {lead.phone ? (
+            <span className="inline-flex items-center gap-1.5 font-semibold text-[color:var(--lp-accent-text)]">
+              <Phone className="size-3.5" />
+              {lead.phone}
+            </span>
+          ) : null}
+          {lead.dirigeant ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-ink">
+              <UserRound className="size-3.5 shrink-0 text-ember" />
+              <span className="truncate">{lead.dirigeant}</span>
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <span className="lp-gauge">
+        <span className="flex items-end gap-[2px]" aria-hidden>
+          {[3, 5.5, 8, 10.5].map((h, i) => (
+            <span
+              key={h}
+              className={cx('w-[3px] rounded-full', i < filled ? color.bg : 'bg-rule-strong')}
+              style={{ height: h }}
+            />
+          ))}
+        </span>
+        <span className={cx('tnum text-[11px] font-semibold', color.text)}>{score}</span>
+      </span>
+    </article>
+  );
+}
+
+function MockSearch({ leads }: { leads: Lead[] }) {
+  const rows = leads.slice(0, 3);
+  return (
+    <div className="lp-mock px-3 pb-3 pt-1">
+      {rows.map((lead, index) => (
+        <MockDeal key={lead.id} lead={lead} starred={index === 1} />
+      ))}
+    </div>
+  );
+}
+
+function ProductMap({ leads, center }: { leads: Lead[]; center: { lat: number; lng: number } }) {
+  const [shown, setShown] = useState<Lead[]>([]);
 
   useEffect(() => {
     let index = 0;
@@ -465,27 +425,28 @@ function ProductMap() {
     };
     const step = () => {
       index += 1;
-      if (index > DEMO_MAP_LEADS.length) {
+      if (index > leads.length) {
         later(3200, () => {
           index = 0;
-          setLeads([]);
+          setShown([]);
           later(700, step);
         });
         return;
       }
-      setLeads(DEMO_MAP_LEADS.slice(0, index));
+      setShown(leads.slice(0, index));
       later(520, step);
     };
+    setShown([]);
     later(600, step);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [leads]);
 
   return (
     <div className="lp-product-map">
-      <GeoMap leads={leads} mode="embed" className="h-full min-h-[280px]" />
+      <GeoMap leads={shown} mode="embed" center={center} className="h-full min-h-[280px]" />
     </div>
   );
 }
@@ -499,6 +460,9 @@ function smoothScrollTo(hash: string) {
 
 export function LandingPage() {
   const { locale, m } = useI18n();
+  const { user, loading } = useAuth();
+  const place = useVisitorPlace();
+  const demoLeads = useMemo(() => relocateLeads(DEMO_MAP_LEADS, place), [place]);
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [configured, setConfigured] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -538,6 +502,12 @@ export function LandingPage() {
   }, [locale, m]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    if (!root.classList.contains('is-boot')) return;
+    window.setTimeout(() => root.classList.remove('is-boot'), 2200);
+  }, []);
+
+  useEffect(() => {
     const ac = new AbortController();
     api
       .billingConfig()
@@ -568,7 +538,7 @@ export function LandingPage() {
         <header className={cx('lp-nav', logoAway && 'is-logo-away')}>
           <a
             href="#top"
-            className="lp-nav-logo shrink-0"
+            className="lp-nav-logo is-3d-wait shrink-0"
             ref={logoRef}
             onClick={(e) => {
               setMenuOpen(false);
@@ -577,9 +547,7 @@ export function LandingPage() {
               }
             }}
             aria-label="Prospy"
-          >
-            <img src="/prospy.png" alt="" width={120} height={36} className="h-full w-auto object-contain" />
-          </a>
+          />
           <div className="lp-nav-tools">
             <span className="lp-nav-lang">
               <LangSwitch compact />
@@ -594,13 +562,31 @@ export function LandingPage() {
             ))}
           </nav>
           <div className="lp-nav-actions">
-            <Link to="/connexion" className="lp-btn lp-btn-ghost lp-nav-login lp-nav-twin uppercase">
-              {m.nav.login}
-            </Link>
-            <Link to="/inscription" className="lp-btn lp-btn-primary lp-nav-cta lp-nav-twin uppercase">
-              <span className="lp-nav-cta-text">{m.nav.start}</span>
-              <ArrowRight className="lp-nav-cta-icon size-3.5 shrink-0" />
-            </Link>
+            {user ? (
+              <>
+                <SettingsLink
+                  className="lp-nav-profile"
+                  title={m.nav.account}
+                >
+                  <UserAvatar username={user.username || user.email} avatarUrl={user.avatarUrl} size={22} />
+                  <span className="lp-nav-profile-name">{user.username || user.email}</span>
+                </SettingsLink>
+                <Link to="/app" className="lp-btn lp-btn-primary lp-nav-cta lp-nav-twin uppercase">
+                  <span className="lp-nav-cta-text">{m.nav.app}</span>
+                  <ArrowRight className="lp-nav-cta-icon size-3.5 shrink-0" />
+                </Link>
+              </>
+            ) : loading ? null : (
+              <>
+                <Link to="/connexion" className="lp-btn lp-btn-ghost lp-nav-login lp-nav-twin uppercase">
+                  {m.nav.login}
+                </Link>
+                <Link to="/inscription" className="lp-btn lp-btn-primary lp-nav-cta lp-nav-twin uppercase">
+                  <span className="lp-nav-cta-text">{m.nav.start}</span>
+                  <ArrowRight className="lp-nav-cta-icon size-3.5 shrink-0" />
+                </Link>
+              </>
+            )}
             <button
               type="button"
               className="lp-nav-burger"
@@ -635,9 +621,21 @@ export function LandingPage() {
             <div className="lp-nav-panel-row">
               <LangSwitch />
               <ThemeToggle compact />
-              <Link to="/connexion" className="lp-btn lp-btn-ghost uppercase" onClick={() => setMenuOpen(false)}>
-                {m.nav.login}
-              </Link>
+              {user ? (
+                <>
+                  <SettingsLink className="lp-nav-profile is-panel" title={m.nav.account} onClick={() => setMenuOpen(false)}>
+                    <UserAvatar username={user.username || user.email} avatarUrl={user.avatarUrl} size={22} />
+                    <span className="lp-nav-profile-name">{user.username || user.email}</span>
+                  </SettingsLink>
+                  <Link to="/app" className="lp-btn lp-btn-primary uppercase" onClick={() => setMenuOpen(false)}>
+                    {m.nav.app}
+                  </Link>
+                </>
+              ) : loading ? null : (
+                <Link to="/connexion" className="lp-btn lp-btn-ghost uppercase" onClick={() => setMenuOpen(false)}>
+                  {m.nav.login}
+                </Link>
+              )}
             </div>
           </div>
         </div>
@@ -650,15 +648,15 @@ export function LandingPage() {
             <div className="lp-hero-copy">
               <p className="lp-chip">{m.hero.chip}</p>
               <h1 className="lp-hero-title mt-5 sm:mt-6">
-                {m.hero.h1a}
+                <GlyphLine text={m.hero.h1a} />
                 <br />
-                <span className="text-[color:var(--lp-accent-text)]"> {m.hero.h1b}</span>
+                <GlyphLine text={m.hero.h1b} className="text-[color:var(--lp-accent-text)]" />
               </h1>
               <p className="lp-hero-lead lp-hero-lead-full">{m.hero.lead}</p>
               <p className="lp-hero-lead lp-hero-lead-short">{m.hero.leadShort}</p>
               <div className="lp-hero-ctas">
-                <Link to="/inscription" className="lp-btn lp-btn-primary">
-                  {m.hero.cta} <ArrowRight className="size-4" />
+                <Link to={user ? '/app' : '/inscription'} className="lp-btn lp-btn-primary">
+                  {user ? m.nav.app : m.hero.cta} <ArrowRight className="size-4" />
                 </Link>
                 <a href="#apercu" className="lp-btn lp-btn-ghost">
                   {m.hero.see}
@@ -667,18 +665,8 @@ export function LandingPage() {
             </div>
             <div id="apercu" className="lp-hero-mocks">
               <div className="lp-reveal is-in" style={{ '--d': '0.05s' } as CSSProperties}>
-                <WindowFrame mascot="hero" label="prospy.app / relevé" lit={0}>
-                  <MockSearch compact />
-                </WindowFrame>
-              </div>
-              <div className="lp-reveal is-in" style={{ '--d': '0.16s' } as CSSProperties}>
-                <WindowFrame label="prospy.app / favoris" lit={1}>
-                  <MockPipeline />
-                </WindowFrame>
-              </div>
-              <div className="lp-reveal is-in" style={{ '--d': '0.27s' } as CSSProperties}>
-                <WindowFrame label="prospy.app / appels" lit={2}>
-                  <MockCall />
+                <WindowFrame mascot="hero" label={m.mock.noSite}>
+                  <MockSearch leads={demoLeads} />
                 </WindowFrame>
               </div>
             </div>
@@ -690,26 +678,30 @@ export function LandingPage() {
             {m.steps.map((item, i) => (
               <div key={item.k} className="lp-reveal lp-interactive" style={{ '--d': `${i * 0.08}s` } as CSSProperties}>
                 <p className="font-mono text-[11px] tracking-widest text-[color:var(--lp-accent-text)]">{item.k}</p>
-                <h2 className="lp-h2 mt-2">{item.t}</h2>
+                <h2 className="lp-h2 mt-2">
+                  <GlyphLine text={item.t} />
+                </h2>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{item.d}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section id="produit" className="lp-cv relative overflow-hidden">
+        <section id="produit" className="lp-cv relative">
           <PhotoSlot name="search" className="lp-section-photo" />
           <div className="lp-section-inner lp-page scroll-mt-24">
             <p className="lp-chip">{m.product.chip}</p>
-            <h2 className="lp-h2 mt-4 max-w-2xl">{m.product.h2}</h2>
+            <h2 className="lp-h2 mt-4 max-w-2xl">
+              <GlyphLine text={m.product.h2} />
+            </h2>
             <p className="mt-4 max-w-xl text-muted">{m.product.lead}</p>
 
             <div className="lp-product-grid mt-12">
-              <WindowFrame mascot="product" label="prospy.app / relevé" lit={0} className="min-h-[280px]">
-                <MockSearch />
+              <WindowFrame mascot="product" label={m.mock.noSite} className="min-h-[280px]">
+                <MockSearch leads={demoLeads} />
               </WindowFrame>
-              <WindowFrame label="prospy.app / carte" lit={2} className="lp-frame-map">
-                <ProductMap />
+              <WindowFrame label={m.mock.mapHint.replace('{city}', place.city)} className="lp-frame-map">
+                <ProductMap leads={demoLeads} center={place} />
               </WindowFrame>
             </div>
           </div>
@@ -718,7 +710,9 @@ export function LandingPage() {
         <section id="fonctionnalites" className="lp-cv border-y border-[var(--lp-line)] bg-[var(--lp-surface)]">
           <div className="lp-page scroll-mt-24">
             <p className="lp-chip">{m.features.chip}</p>
-            <h2 className="lp-h2 mt-4">{m.features.h2}</h2>
+            <h2 className="lp-h2 mt-4">
+              <GlyphLine text={m.features.h2} />
+            </h2>
             <div className="lp-features-grid mt-10">
               {m.features.items.map((item, index) => {
                 const Icon = featureIcons[index];
@@ -732,7 +726,9 @@ export function LandingPage() {
                     <span className="inline-flex size-11 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_18%,transparent)] text-[color:var(--lp-accent-text)]">
                       <Icon className="size-5" />
                     </span>
-                    <h3 className="mt-5 text-xl">{item.title}</h3>
+                    <h3 className="mt-5 text-xl">
+                      <GlyphLine text={item.title} />
+                    </h3>
                     <p className="mt-2 text-sm leading-relaxed text-muted">{item.text}</p>
                     <p className="mt-4 text-sm font-medium">
                       {m.features.why} <span className="font-normal text-muted">{item.why}</span>
@@ -744,14 +740,16 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="lp-cv lp-page text-center">
+        <section className="lp-cv lp-page text-center" data-mascot="launch">
           <p className="lp-chip">{m.launch.chip}</p>
-          <h2 className="lp-h2 mx-auto mt-4 max-w-2xl">{m.launch.h2}</h2>
+          <h2 className="lp-h2 mx-auto mt-4 max-w-2xl">
+            <GlyphLine text={m.launch.h2} />
+          </h2>
           <p className="mx-auto mt-4 max-w-lg text-muted">{m.launch.lead}</p>
           <div className="lp-command mt-10 text-left">
             <MapPin className="size-4 shrink-0 text-[color:var(--lp-accent-text)]" />
             <p className="min-w-0 flex-1 font-mono text-[13px] tracking-tight">
-              <span className="text-ink">Lyon</span>
+              <span className="text-ink">{place.city}</span>
               <span className="text-faint"> · </span>
               <span className="text-muted">coiffeur, plombier, garage</span>
               <span className="text-faint"> · </span>
@@ -766,7 +764,9 @@ export function LandingPage() {
         <section id="confiance" className="lp-cv border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
           <div className="lp-page scroll-mt-24">
             <p className="lp-chip">{m.trust.chip}</p>
-            <h2 className="lp-h2 mt-4 max-w-2xl">{m.trust.h2}</h2>
+            <h2 className="lp-h2 mt-4 max-w-2xl">
+              <GlyphLine text={m.trust.h2} />
+            </h2>
             <p className="mt-4 max-w-xl text-muted">{m.trust.lead}</p>
             <ul className="lp-features-grid mt-10">
               {m.trust.items.map((item, index) => {
@@ -788,14 +788,23 @@ export function LandingPage() {
                 );
               })}
             </ul>
+            <aside className="lp-reveal mt-8 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6">
+              <h3 className="text-lg">{m.trust.googleTitle}</h3>
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{m.trust.googleText}</p>
+              <Link to="/confidentialite" className="mt-3 inline-block text-sm font-medium text-lime-deep">
+                {m.trust.googlePrivacy}
+              </Link>
+            </aside>
           </div>
         </section>
 
-        <section id="tarifs" className="lp-cv relative overflow-hidden border-t border-[var(--lp-line)]">
+        <section id="tarifs" className="lp-cv relative border-t border-[var(--lp-line)]">
           <PhotoSlot name="plans" className="lp-section-photo" />
           <div className="lp-section-inner lp-page scroll-mt-24">
             <p className="lp-chip">{m.pricing.chip}</p>
-            <h2 className="lp-h2 mt-4">{m.pricing.h2}</h2>
+            <h2 className="lp-h2 mt-4">
+              <GlyphLine text={m.pricing.h2} />
+            </h2>
             <p className="mt-4 max-w-xl text-muted">{m.pricing.lead}</p>
             <div className="lp-plans mt-10">
               {shownPlans.map((plan) => (
@@ -820,6 +829,12 @@ export function LandingPage() {
                         <span>{feature}</span>
                       </li>
                     ))}
+                    {(plan.locked ?? []).map((feature) => (
+                      <li key={feature} className="flex gap-2 text-faint">
+                        <X className="mt-0.5 size-4 shrink-0" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
                   </ul>
                   <Link
                     to={configured && plan.priceConfigured ? `/abonnement?plan=${plan.id}` : '/inscription'}
@@ -833,31 +848,34 @@ export function LandingPage() {
             {!configured && <p className="mt-6 text-sm text-faint">{m.pricing.stripeOff}</p>}
           </div>
         </section>
-
-        <section className="lp-glow relative overflow-hidden border-t border-[var(--lp-line)] lp-page text-center">
-          <RadarField variant="cta" />
-          <div className="relative">
-            <h2 className="lp-h2 mx-auto max-w-3xl">{m.cta.h2}</h2>
-            <p className="mx-auto mt-4 max-w-lg text-muted">{m.cta.lead}</p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link to="/inscription" className="lp-btn lp-btn-primary">
-                {m.cta.create} <ArrowRight className="size-4" />
-              </Link>
-              <Link to="/connexion" className="lp-btn lp-btn-ghost">
-                {m.cta.open}
-              </Link>
-            </div>
-          </div>
-        </section>
       </main>
 
-      <footer className="border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
-        <div className="mx-auto flex max-w-6xl flex-col gap-12 px-[clamp(1rem,4vw,1.5rem)] py-14 sm:flex-row sm:justify-between">
-          <div>
-            <img src="/prospy.png" alt="Prospy" width={120} height={32} className="h-8 w-auto object-contain" />
-            <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">{m.footer.blurb}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-3">
+      <div className="lp-end">
+          <RadarField variant="cta" />
+          <section className="lp-cta-band relative border-t border-[var(--lp-line)] text-center" data-mascot="cta">
+            <div className="lp-page relative">
+              <h2 className="lp-h2 mx-auto max-w-3xl">
+                <GlyphLine text={m.cta.h2} />
+              </h2>
+              <p className="mx-auto mt-4 max-w-lg text-muted">{m.cta.lead}</p>
+              <div className="mt-8 flex flex-wrap justify-center gap-3">
+                <Link to="/inscription" className="lp-btn lp-btn-primary">
+                  {m.cta.create} <ArrowRight className="size-4" />
+                </Link>
+                <Link to="/connexion" className="lp-btn lp-btn-ghost">
+                  {m.cta.open}
+                </Link>
+              </div>
+            </div>
+          </section>
+
+          <footer className="border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
+            <div className="mx-auto flex max-w-6xl flex-col gap-12 px-[clamp(1rem,4vw,1.5rem)] py-14 sm:flex-row sm:justify-between">
+              <div>
+                <a href="#top" className="lp-footer-logo" data-mascot="dock" aria-label="Prospy" />
+                <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">{m.footer.blurb}</p>
+              </div>
+          <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-4">
             <div>
               <p className="legend mb-3">{m.footer.product}</p>
               <ul className="space-y-2 text-muted">
@@ -894,6 +912,21 @@ export function LandingPage() {
               </ul>
             </div>
             <div>
+              <p className="legend mb-3">{m.footer.legal}</p>
+              <ul className="space-y-2 text-muted">
+                <li>
+                  <Link to="/cgu" className="hover:text-ink">
+                    {m.footer.terms}
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/confidentialite" className="hover:text-ink">
+                    {m.footer.privacy}
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
               <p className="legend mb-3">{m.footer.look}</p>
               <ThemeToggle />
             </div>
@@ -903,6 +936,7 @@ export function LandingPage() {
           <p className="mx-auto max-w-6xl px-4 py-5 font-mono text-[11px] tracking-wide text-faint sm:px-6">{m.footer.copy}</p>
         </div>
       </footer>
+      </div>
     </div>
   );
 }

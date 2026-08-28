@@ -5,7 +5,13 @@ import type { SearchRecord } from '../../shared/types';
 import { api } from '../api';
 
 /** Rappel des dernières recherches, rejouables en un clic. */
-export function RecentSearches({ onReplay }: { onReplay: (search: SearchRecord) => void }) {
+export function RecentSearches({
+  onReplay,
+  historyTo = '/app/historique',
+}: {
+  onReplay: (search: SearchRecord) => void;
+  historyTo?: string;
+}) {
   const [searches, setSearches] = useState<SearchRecord[]>([]);
 
   useEffect(() => {
@@ -26,7 +32,7 @@ export function RecentSearches({ onReplay }: { onReplay: (search: SearchRecord) 
       <div className="mb-2 flex items-center justify-between border-b border-rule pb-1.5">
         <h2 className="legend">relevés précédents</h2>
         <Link
-          to="/app/historique"
+          to={historyTo}
           className="inline-flex items-center gap-1 text-xs font-medium text-faint transition hover:text-lime-deep"
         >
           tout l’historique <ArrowRight className="size-3" />
