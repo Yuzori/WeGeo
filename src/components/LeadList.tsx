@@ -7,6 +7,7 @@ import { SORT_LABELS, sortLeads, type SortMode } from '../lib/lead';
 import { LeadCard } from './LeadCard';
 import { Button, LeadSkeleton, cx, useToast } from './ui';
 import { sessionPath } from '../workspace';
+import { useAuth, userLimits } from '../auth';
 
 interface LeadListProps {
   collection: LeadCollection;
@@ -31,6 +32,7 @@ export function LeadList({
   const notify = useToast();
   const navigate = useNavigate();
   const { workspaceId } = useParams();
+  const canCall = userLimits(useAuth().user).mapAndCalls;
   const [sort, setSort] = useState<SortMode>('potentiel');
   const [selection, setSelection] = useState<Set<number>>(new Set());
 
@@ -120,7 +122,7 @@ export function LeadList({
           </select>
         </label>
 
-        {callable && rows.length > 0 && (
+        {callable && canCall && rows.length > 0 && (
           <Button
             size="sm"
             variant="soft"

@@ -9,18 +9,16 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
   const title = kind === 'privacy' ? (fr ? 'Confidentialité' : 'Privacy policy') : fr ? 'Conditions d’utilisation' : 'Terms of use';
 
   useEffect(() => {
-    document.title = `${title} — Prospy`;
+    document.title = `${title}. Prospy`;
   }, [title]);
 
   return (
     <div className="landing">
       <div className="mx-auto max-w-2xl px-3 py-10 sm:px-4 sm:py-12">
-        <Link to="/" className="mb-8 inline-flex">
-          <BrandMark alt="Prospy" className="h-10 w-10" />
-        </Link>
+        <BrandMark alt="Prospy" className="mb-8 h-10 w-10" />
         <p className="legend mb-2">{fr ? 'documents' : 'legal'}</p>
         <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-        <p className="mt-2 text-sm text-muted">{fr ? 'Dernière mise à jour : 26 août 2026.' : 'Last updated: 26 August 2026.'}</p>
+        <p className="mt-2 text-sm text-muted">{fr ? 'Dernière mise à jour. 26 août 2026.' : 'Last updated. 26 August 2026.'}</p>
         <div className="mt-8 space-y-6 text-sm leading-relaxed text-muted">
           {kind === 'privacy' ? (fr ? <PrivacyFr /> : <PrivacyEn />) : fr ? <TermsFr /> : <TermsEn />}
         </div>
@@ -47,33 +45,33 @@ function PrivacyFr() {
       </p>
       <h2 className="text-base font-semibold text-ink">Données collectées</h2>
       <ul className="list-disc space-y-1 pl-5">
-        <li>Compte : e-mail, pseudo, mot de passe (stocké sous forme de hash), date de création.</li>
-        <li>Google : identifiant Google, e-mail, jetons d’accès nécessaires à la connexion et à l’export Sheets, si vous le demandez.</li>
-        <li>Usage : sessions de connexion, espaces de travail, invitations, recherches et fiches d’entreprises que vous générez (dont le nom du dirigeant, issu de l’API publique Recherche d’entreprises / SIRENE).</li>
-        <li>Paiement : identifiants Stripe (pas de numéro de carte stocké chez Prospy), si un abonnement est souscrit.</li>
-        <li>Technique : journaux serveur limités (erreurs, sécurité).</li>
+        <li>Compte. E-mail, pseudo, mot de passe (stocké sous forme de hash), date de création.</li>
+        <li>Google. Identifiant Google, e-mail, jetons d’accès nécessaires à la connexion et à l’export Sheets, si vous le demandez.</li>
+        <li>Usage. Sessions de connexion, espaces de travail, invitations, recherches et fiches d’entreprises que vous générez (dont le nom du dirigeant, issu de l’API publique Recherche d’entreprises / SIRENE).</li>
+        <li>Paiement. Identifiants Stripe (pas de numéro de carte stocké chez Prospy), si un abonnement est souscrit.</li>
+        <li>Technique. Journaux serveur limités (erreurs, sécurité).</li>
       </ul>
       <h2 className="text-base font-semibold text-ink">Finalités</h2>
       <p>
         Fournir le service (compte, sessions partagées, relevés, export), sécuriser l’accès, envoyer les e-mails
-        transactionnels (code, invitation, mot de passe) et, le cas échéant, gérer l’abonnement. Base légale : exécution
+        transactionnels (code, invitation, mot de passe) et, le cas échéant, gérer l’abonnement. Base légale. Exécution
         du contrat et intérêt légitime de sécurité. Pas de publicité tierce, pas de vente de données.
       </p>
       <h2 className="text-base font-semibold text-ink">Connexion Google</h2>
       <p>
-        Si vous choisissez « Continuer avec Google », Prospy demande : e-mail et profil (pour créer ou retrouver le
+        Si vous choisissez « Continuer avec Google », Prospy demande l’e-mail et le profil (pour créer ou retrouver le
         compte), et l’autorisation Google Sheets (pour créer un tableur de vos relevés uniquement quand vous cliquez sur
-        exporter). Ces accès ne servent à rien d’autre : pas de lecture de Drive, pas d’envoi d’e-mails, pas de
+        exporter). Ces accès ne servent à rien d’autre. Pas de lecture de Drive, pas d’envoi d’e-mails, pas de
         publicité, pas de revente. Vous pouvez révoquer l’accès dans votre compte Google à tout moment.
       </p>
       <h2 className="text-base font-semibold text-ink">Conservation et destinataires</h2>
       <p>
-        Les données restent le temps du compte, puis sont supprimées ou anonymisées après clôture. Hébergement et e-mail
-        : prestataires techniques (hébergeur, Resend, Stripe, Google). Pas de transfert hors de ces finalités.
+        Les données restent le temps du compte, puis sont supprimées ou anonymisées après clôture. Hébergement et e-mail.
+        Prestataires techniques (hébergeur, Resend, Stripe, Google). Pas de transfert hors de ces finalités.
       </p>
       <h2 className="text-base font-semibold text-ink">Vos droits</h2>
       <p>
-        Accès, rectification, suppression, opposition, portabilité : écrivez à contact@prospy.fr. Réclamation possible
+        Accès, rectification, suppression, opposition, portabilité. Écrivez à contact@prospy.fr. Réclamation possible
         auprès de la CNIL. Les fiches de prospects que vous collectez via Maps sont sous votre responsabilité (RGPD
         applicable à votre fichier client).
       </p>
@@ -90,22 +88,22 @@ function PrivacyEn() {
       </p>
       <h2 className="text-base font-semibold text-ink">Data we collect</h2>
       <ul className="list-disc space-y-1 pl-5">
-        <li>Account: email, username, password (stored as a hash), creation date.</li>
-        <li>Google: Google id, email, and tokens needed for sign-in and Sheets export, if you request it.</li>
-        <li>Usage: login sessions, workspaces, invites, searches and business cards you generate (including the legal representative’s name from the public SIRENE / Recherche d’entreprises API).</li>
-        <li>Billing: Stripe identifiers (no card numbers stored by Prospy), if you subscribe.</li>
-        <li>Technical: limited server logs (errors, security).</li>
+        <li>Account. Email, username, password (stored as a hash), creation date.</li>
+        <li>Google. Google id, email, and tokens needed for sign-in and Sheets export, if you request it.</li>
+        <li>Usage. Login sessions, workspaces, invites, searches and business cards you generate (including the legal representative’s name from the public SIRENE / Recherche d’entreprises API).</li>
+        <li>Billing. Stripe identifiers (no card numbers stored by Prospy), if you subscribe.</li>
+        <li>Technical. Limited server logs (errors, security).</li>
       </ul>
       <h2 className="text-base font-semibold text-ink">Purposes</h2>
       <p>
         To provide the service, secure access, send transactional email (codes, invites, password reset), and manage a
-        subscription when applicable. Legal bases: contract and legitimate interest in security. No third-party ads, no
+        subscription when applicable. Legal bases. Contract and legitimate interest in security. No third-party ads, no
         sale of data.
       </p>
       <h2 className="text-base font-semibold text-ink">Google sign-in</h2>
       <p>
         If you choose Continue with Google, Prospy asks for email and profile (to create or find your account), and for
-        Google Sheets access (to create a spreadsheet of your surveys only when you click export). Nothing else: no Drive
+        Google Sheets access (to create a spreadsheet of your surveys only when you click export). Nothing else. No Drive
         browsing, no sending email as you, no ads, no resale. You can revoke access in your Google account at any time.
       </p>
       <h2 className="text-base font-semibold text-ink">Retention and recipients</h2>
@@ -115,7 +113,7 @@ function PrivacyEn() {
       </p>
       <h2 className="text-base font-semibold text-ink">Your rights</h2>
       <p>
-        Access, correction, deletion, objection, portability: contact@prospy.fr. You may also complain to a supervisory
+        Access, correction, deletion, objection, portability. Write to contact@prospy.fr. You may also complain to a supervisory
         authority. Prospect records you collect from Maps are your responsibility under applicable privacy law.
       </p>
     </>
@@ -138,7 +136,7 @@ function TermsFr() {
       <h2 className="text-base font-semibold text-ink">Usage autorisé</h2>
       <p>
         Prospy est destiné à une prospection professionnelle. Vous vous engagez à respecter le droit applicable (dont
-        RGPD, démarchage, conditions de Google). Interdit : usage abusif, scraping hors de l’outil, atteinte à la
+        RGPD, démarchage, conditions de Google). Interdit. Usage abusif, scraping hors de l’outil, atteinte à la
         sécurité, revente brute du service.
       </p>
       <h2 className="text-base font-semibold text-ink">Service et abonnement</h2>
@@ -153,7 +151,7 @@ function TermsFr() {
         responsable de l’usage que vous faites des contacts. Notre responsabilité, si elle était retenue, est limitée
         aux sommes payées sur les 12 derniers mois. Droit français, tribunaux compétents du siège de l’éditeur.
       </p>
-      <p>Contact : contact@prospy.fr</p>
+      <p>Contact. contact@prospy.fr</p>
     </>
   );
 }
@@ -185,7 +183,7 @@ function TermsEn() {
         Cards come from public Google Maps data and may be incomplete. You are responsible for how you use contacts. If
         liability is found, it is limited to amounts paid in the last 12 months. French law applies.
       </p>
-      <p>Contact: contact@prospy.fr</p>
+      <p>Contact. contact@prospy.fr</p>
     </>
   );
 }

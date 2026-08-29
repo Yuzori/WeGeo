@@ -8,6 +8,7 @@ import {
   type SearchRecord,
 } from '../../shared/types';
 import { api, openSearchStream } from '../api';
+import { useAuth, userLimits } from '../auth';
 import { SearchForm } from '../components/SearchForm';
 import { LeadList } from '../components/LeadList';
 import { SheetModal } from '../components/SheetModal';
@@ -23,6 +24,8 @@ import { useParams } from 'react-router-dom';
 
 export function SearchPage() {
   const notify = useToast();
+  const { user } = useAuth();
+  const limits = userLimits(user);
   const { workspaceId } = useParams();
   const { meta, refreshMeta } = useMeta();
 
@@ -45,6 +48,10 @@ export function SearchPage() {
 
   // Les résultats en direct sont alimentés par le flux, pas par une requête.
   const collection = useLeadCollection(null, refreshMeta);
+
+  useEffect(() => {
+    setDomains((current) => (current.length > limits.maxDomains ? current.slice(0, limits.maxDomains) : current));
+  }, [limits.maxDomains, setDomains]);
 
   useEffect(() => () => closeStream.current?.(), []);
 
@@ -87,8 +94,8 @@ export function SearchPage() {
             if (isResumable(event.search)) setInterrupted(event.search);
             notify(
               event.search.status === 'annule'
-                ? `Relevé arrêté — ${event.search.found} entreprise(s) trouvée(s)`
-                : `Relevé terminé — ${event.search.found} entreprise(s) sans site sur ${event.search.scanned} inspectée(s)`,
+                ? `Relevé arrêté. ${event.search.found} entreprise(s) trouvée(s)`
+                : `Relevé terminé. ${event.search.found} entreprise(s) sans site sur ${event.search.scanned} inspectée(s)`,
               'success',
             );
             break;
@@ -265,7 +272,7 @@ export function SearchPage() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">
-              Relevé interrompu à {interrupted.city} — il reste{' '}
+              Relevé interrompu à {interrupted.city}. Il reste{' '}
               <span className="tnum">{(interrupted.totalTasks ?? 0) - interrupted.doneTasks}</span> métier(s) à
               parcourir
             </p>
@@ -301,7 +308,7 @@ export function SearchPage() {
           startedAt={startedAt}
           onStop={running ? cancel : undefined}
           onExpandMap={() => setMapOpen(true)}
-          showMap={!sheetOpen}
+          showMap={limits.mapAndCalls && !sheetOpen}
         />
       )}
 
@@ -315,8 +322,12 @@ export function SearchPage() {
 
       {/* Bilan du relevé terminé, avec la carte des positions trouvées. */}
       {!running && results.length > 0 && !sheetOpen && (
-        <section className="sheet-raised rise-in grid gap-5 p-4 sm:grid-cols-[minmax(0,180px)_1fr]">
-          <MiniMap leads={results} onExpand={() => setMapOpen(true)} className="mx-auto w-full max-w-[220px]" />
+        <section
+          className={`sheet-raised rise-in grid gap-5 p-4 ${limits.mapAndCalls ? 'sm:grid-cols-[minmax(0,180px)_1fr]' : ''}`}
+        >
+          {limits.mapAndCalls && (
+            <MiniMap leads={results} onExpand={() => setMapOpen(true)} className="mx-auto w-full max-w-[220px]" />
+          )}
           <div className="flex flex-col justify-center gap-2">
             <p className="text-lg font-semibold">
               <span className="tnum">{results.length}</span> entreprise{results.length > 1 ? 's' : ''} à contacter
@@ -381,7 +392,7 @@ export function SearchPage() {
         />
       )}
 
-      {mapOpen && !sheetOpen && <MapView leads={results} onClose={() => setMapOpen(false)} />}
+      {limits.mapAndCalls && mapOpen && !sheetOpen && <MapView leads={results} onClose={() => setMapOpen(false)} />}
     </div>
   );
 }

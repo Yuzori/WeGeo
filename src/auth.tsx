@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import type { PublicUser } from '../shared/types';
+import { PLAN_LIMITS, type PlanLimits } from '../shared/plans';
 import { api } from './api';
 
 interface AuthValue {
@@ -69,6 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={{ user, loading, refresh, setUser }}>{children}</AuthContext.Provider>;
 }
 
+export function userLimits(user: PublicUser | null | undefined): PlanLimits {
+  return user?.limits ?? PLAN_LIMITS.starter;
+}
+
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -81,6 +86,14 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
   if (user.needsUsername && location.pathname !== '/app/pseudo') {
     return <Navigate to="/app/pseudo" replace />;
+  }
+  return <>{children}</>;
+}
+
+export function RequirePaid({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user && user.hasAccess === false) {
+    return <Navigate to="/abonnement" replace />;
   }
   return <>{children}</>;
 }

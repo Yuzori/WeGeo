@@ -5,6 +5,7 @@ import { LeadList } from '../components/LeadList';
 import { MapView } from '../components/MapView';
 import { SheetModal } from '../components/SheetModal';
 import { Button, EmptyState } from '../components/ui';
+import { useAuth, userLimits } from '../auth';
 import { useLeadCollection, useMeta } from '../hooks';
 
 interface PipelinePageProps {
@@ -35,6 +36,7 @@ export function PipelinePage({
   restoreMode,
 }: PipelinePageProps) {
   const { refreshMeta } = useMeta();
+  const showMap = userLimits(useAuth().user).mapAndCalls;
   const [term, setTerm] = useState('');
   const [city, setCity] = useState('');
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -78,9 +80,11 @@ export function PipelinePage({
           <Button variant="ghost" icon={<RefreshCw className="size-4" />} onClick={collection.refresh}>
             Actualiser
           </Button>
-          <Button icon={<Map className="size-4" />} onClick={() => setMapOpen(true)} disabled={!filtered.length}>
-            Carte
-          </Button>
+          {showMap && (
+            <Button icon={<Map className="size-4" />} onClick={() => setMapOpen(true)} disabled={!filtered.length}>
+              Carte
+            </Button>
+          )}
           <Button
             icon={<Table2 className="size-4" />}
             onClick={() => {
@@ -134,7 +138,7 @@ export function PipelinePage({
 
       <SheetModal open={sheetOpen} onClose={() => setSheetOpen(false)} query={{ status }} title={title.toLowerCase()} />
 
-      {mapOpen && !sheetOpen && <MapView leads={filtered} onClose={() => setMapOpen(false)} />}
+      {showMap && mapOpen && !sheetOpen && <MapView leads={filtered} onClose={() => setMapOpen(false)} />}
     </div>
   );
 }

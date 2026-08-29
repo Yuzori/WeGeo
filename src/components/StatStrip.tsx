@@ -45,7 +45,7 @@ export function StatStrip({ stats, base = '/app' }: { stats: Stats; base?: strin
 
           <div className="flex items-baseline gap-1.5">
             {value === null ? (
-              <span className="tnum text-2xl leading-none font-semibold text-faint">—</span>
+              <span className="tnum text-2xl leading-none font-semibold text-faint">-</span>
             ) : (
               <Counter
                 value={value}

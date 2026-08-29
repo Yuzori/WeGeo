@@ -211,7 +211,7 @@ export function RadarMap({
                   window.open(blip.mapsUrl, '_blank', 'noopener');
                 }}
               >
-                <title>{`${blip.name} — potentiel ${blip.score}/100`}</title>
+                <title>{`${blip.name}. Potentiel ${blip.score}/100`}</title>
 
                 {hit && (
                   <circle r={radius + 4} fill="none" stroke={blip.color} strokeWidth="0.55" opacity="0.75" />

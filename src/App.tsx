@@ -4,11 +4,10 @@ import { Check, History, Inbox, Layers, Menu, PhoneCall, Search, Settings, Star,
 import type { LucideIcon } from 'lucide-react';
 import type { PeopleMatch, SearchRecord, Workspace } from '../shared/types';
 import { api, setApiWorkspace } from './api';
-import { RequireAuth, useAuth } from './auth';
+import { RequireAuth, RequirePaid, useAuth, userLimits } from './auth';
 import { MetaContext, useMetaState, useStored } from './hooks';
 import { CommandPalette } from './components/CommandPalette';
 import { InviteInbox } from './components/InviteInbox';
-import { BrandMark } from './components/BrandMark';
 import { LogoFlight } from './components/LogoFlight';
 import { LogoutButton } from './components/LogoutButton';
 import { GUIDE_STEPS, GUIDE_STORAGE_KEY, MascotGuide, type GuideStep } from './components/MascotGuide';
@@ -80,13 +79,12 @@ function InviteField({
     setBusy(true);
     setInfo(null);
     try {
-      const looked = await api.lookupPerson(query);
-      const invited = await api.inviteToWorkspace(workspaceId, looked.email);
+      const invited = await api.inviteToWorkspace(workspaceId, query);
       setQuery('');
       setMatches([]);
       setOpen(false);
       onInvited?.(invited.workspace);
-      setInfo(looked.found ? 'Invitation envoyée dans l’app.' : 'Pas encore de compte : l’invitation l’attendra.');
+      setInfo('Invitation envoyée.');
     } catch (err) {
       setInfo(err instanceof Error ? err.message : 'Invitation impossible.');
     } finally {
@@ -133,7 +131,6 @@ function InviteField({
                   <UserAvatar username={person.username} avatarUrl={person.avatarUrl} size={22} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11px] font-semibold">{person.username}</span>
-                    <span className="block truncate text-[10px] text-faint">{person.email}</span>
                   </span>
                 </button>
               </li>
@@ -158,10 +155,8 @@ function Wordmark({
       to="/app"
       ref={markRef}
       aria-label="Prospy"
-      className={cx('app-logo-slot', mobile && 'app-logo-slot-mobile')}
-    >
-      <BrandMark alt="" className="h-full w-full" />
-    </Link>
+      className={cx('app-logo-slot is-3d-wait', mobile && 'app-logo-slot-mobile')}
+    />
   );
 }
 
@@ -275,7 +270,9 @@ function Sidebar({
           {user && (
             <div className="space-y-2">
               {sessionName && <p className="truncate text-[11px] font-semibold text-ink">{sessionName}</p>}
-              {workspaceId ? <InviteField workspaceId={workspaceId} onInvited={onWorkspaceChange} /> : null}
+              {workspaceId && userLimits(user).maxSeats > 1 ? (
+                <InviteField workspaceId={workspaceId} onInvited={onWorkspaceChange} />
+              ) : null}
               <div className="min-w-0 space-y-1">
                 <SettingsLink
                   className="flex min-w-0 items-center gap-2 rounded-lg px-0.5 py-0.5 hover:bg-card-2"
@@ -322,8 +319,7 @@ function SubscriptionBanner() {
       .catch(() => {});
   }, []);
 
-  if (!needed || !user) return null;
-  if (user.subscriptionStatus === 'active' || user.subscriptionStatus === 'trialing') return null;
+  if (!needed || !user || user.hasAccess !== false) return null;
 
   return (
     <div className="border-b border-lime-line bg-lime-soft px-4 py-2 text-sm">
@@ -337,6 +333,7 @@ function SubscriptionBanner() {
 
 function AppShell() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { workspaceId } = useParams();
   const id = Number(workspaceId);
   if (Number.isInteger(id) && id > 0) setApiWorkspace(id);
@@ -417,6 +414,7 @@ function AppShell() {
   }, [guideTarget, finishGuide]);
 
   const stats = metaState.meta?.stats;
+  const canCall = userLimits(user).mapAndCalls;
   const items: NavItem[] = [
     { to: '/app', label: 'Sessions', icon: Layers, hint: 'Changer de session', end: true },
     { to: sessionPath(id), label: 'Recherche', icon: Search, hint: 'Lancer une nouvelle prospection', end: true },
@@ -427,13 +425,17 @@ function AppShell() {
       count: stats?.nouveau,
       hint: 'Entreprises trouvées, pas encore classées',
     },
-    {
-      to: sessionPath(id, '/appels'),
-      label: 'Appels',
-      icon: PhoneCall,
-      count: (stats?.favori ?? 0) + (stats?.nouveau ?? 0),
-      hint: 'Session d’appels, une fiche à la fois',
-    },
+    ...(canCall
+      ? [
+          {
+            to: sessionPath(id, '/appels'),
+            label: 'Appels',
+            icon: PhoneCall,
+            count: (stats?.favori ?? 0) + (stats?.nouveau ?? 0),
+            hint: 'Session d’appels, une fiche à la fois',
+          } satisfies NavItem,
+        ]
+      : []),
     { to: sessionPath(id, '/favoris'), label: 'Favoris', icon: Star, count: stats?.favori, hint: 'À appeler' },
     { to: sessionPath(id, '/signes'), label: 'Signés', icon: Check, count: stats?.termine, hint: 'Clients conclus' },
     {
@@ -544,7 +546,9 @@ function AppRoutes() {
         path="/app"
         element={
           <RequireAuth>
-            <SessionsPage />
+            <RequirePaid>
+              <SessionsPage />
+            </RequirePaid>
           </RequireAuth>
         }
       />
@@ -552,7 +556,9 @@ function AppRoutes() {
         path="/app/s/:workspaceId"
         element={
           <RequireAuth>
-            <AppShell />
+            <RequirePaid>
+              <AppShell />
+            </RequirePaid>
           </RequireAuth>
         }
       >
@@ -580,7 +586,7 @@ function AppRoutes() {
               description="Votre liste d’appels. Appelez, puis classez chaque fiche en « signé » ou « non conclu »."
               icon={<Star className="size-6" />}
               emptyTitle="Aucun favori pour l’instant"
-              emptyDescription="Pendant une recherche, cliquez sur l’étoile des entreprises intéressantes : elles arrivent ici, prêtes à être appelées."
+              emptyDescription="Pendant une recherche, cliquez sur l’étoile des entreprises intéressantes. Elles arrivent ici, prêtes à être appelées."
             />
           }
         />
@@ -607,7 +613,7 @@ function AppRoutes() {
               description="Les entreprises contactées sans succès. Elles sont exclues des prochaines recherches."
               icon={<ThumbsDown className="size-6" />}
               emptyTitle="Aucune fiche écartée"
-              emptyDescription="Après un appel infructueux, marquez la fiche « non conclu » : elle ne polluera plus vos résultats."
+              emptyDescription="Après un appel infructueux, marquez la fiche « non conclu ». Elle ne polluera plus vos résultats."
               restoreMode
             />
           }

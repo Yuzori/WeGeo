@@ -5,7 +5,7 @@
 
 import type { NextFunction, Request, Response } from 'express';
 import type { PeopleMatch, Workspace, WorkspaceInvite, WorkspaceMember } from '../shared/types.ts';
-import { currentUser, findUserByEmail, findUserById, findUserByLogin, normalizeEmail, validateEmail, type AuthUser } from './auth.ts';
+import { currentUser, findUserByEmail, findUserById, findUserByLogin, normalizeEmail, planLimitsForUser, validateEmail, type AuthUser } from './auth.ts';
 import { avatarUrl } from './avatars.ts';
 import db, { ensurePersonalWorkspace } from './db.ts';
 import { mailConfigured, sendInviteEmail } from './mail.ts';
@@ -28,6 +28,29 @@ function membership(workspaceId: number, userId: number): { role: 'owner' | 'mem
   if (!row) return null;
   const role = row.role === 'owner' ? 'owner' : 'member';
   return { role };
+}
+
+export function shareWorkspace(userA: number, userB: number): boolean {
+  if (userA === userB) return true;
+  const row = db
+    .prepare(
+      `SELECT 1 FROM workspace_members a
+       JOIN workspace_members b ON a.workspace_id = b.workspace_id
+       WHERE a.user_id = ? AND b.user_id = ?
+       LIMIT 1`,
+    )
+    .get(userA, userB);
+  return Boolean(row);
+}
+
+function seatCount(workspaceId: number): number {
+  const members = db.prepare('SELECT COUNT(*) AS n FROM workspace_members WHERE workspace_id = ?').get(workspaceId) as
+    | Row
+    | undefined;
+  const pending = db
+    .prepare(`SELECT COUNT(*) AS n FROM workspace_invites WHERE workspace_id = ? AND status = 'pending'`)
+    .get(workspaceId) as Row | undefined;
+  return Number(members?.n ?? 0) + Number(pending?.n ?? 0);
 }
 
 function workspaceExists(id: number): boolean {
@@ -257,7 +280,7 @@ export async function invite(
   user: AuthUser,
   queryRaw: string,
   locale?: string,
-): Promise<{ ok: true; email: string; workspace: Workspace } | { error: string; status: number }> {
+): Promise<{ ok: true; found: boolean; workspace: Workspace } | { error: string; status: number }> {
   const member = membership(workspaceId, user.id);
   if (!member) return { error: 'Cette session ne vous est pas ouverte.', status: 403 };
   if (!workspaceExists(workspaceId)) return { error: 'Session introuvable.', status: 404 };
@@ -275,6 +298,15 @@ export async function invite(
   const current = db
     .prepare('SELECT personal, owner_id FROM workspaces WHERE id = ?')
     .get(workspaceId) as Row | undefined;
+  const owner = current ? findUserById(Number(current.owner_id)) : null;
+  const limits = planLimitsForUser(owner ?? user);
+  if (limits.maxSeats <= 1) {
+    return { error: 'Les invitations d’équipe sont réservées aux offres Pro et Agence.', status: 402 };
+  }
+  if (seatCount(workspaceId) >= limits.maxSeats) {
+    return { error: `Cette session est limitée à ${limits.maxSeats} personnes.`, status: 403 };
+  }
+
   if (current && Number(current.personal) === 1) {
     db.prepare('UPDATE workspaces SET personal = 0, auto_named = 1 WHERE id = ?').run(workspaceId);
     ensurePersonalWorkspace(user.id);
@@ -303,7 +335,7 @@ export async function invite(
     }
   }
 
-  return { ok: true, email, workspace };
+  return { ok: true, found: looked.found, workspace };
 }
 
 export function acceptInvite(inviteId: number, user: AuthUser): Workspace | { error: string; status: number } {
@@ -362,30 +394,39 @@ export function searchPeople(user: AuthUser, queryRaw: string): PeopleMatch[] {
   const prefix = `${safe}%`;
   const rows = db
     .prepare(
-      `SELECT id, username, email FROM users
+      `SELECT id, username FROM users
        WHERE id != ?
          AND email_verified = 1
-         AND (LOWER(username) LIKE ? OR LOWER(email) LIKE ?)
+         AND LOWER(username) LIKE ?
        ORDER BY
          CASE
            WHEN LOWER(username) = ? THEN 0
-           WHEN LOWER(email) = ? THEN 1
-           WHEN LOWER(username) LIKE ? THEN 2
-           WHEN LOWER(email) LIKE ? THEN 3
-           ELSE 4
+           WHEN LOWER(username) LIKE ? THEN 1
+           ELSE 2
          END,
          username
        LIMIT 8`,
     )
-    .all(user.id, like, like, safe, safe, prefix, prefix) as Row[];
-  return rows.map((row) => ({
-    id: Number(row.id),
-    username: String(row.username ?? ''),
-    email: String(row.email ?? ''),
-    avatarUrl: avatarUrl(Number(row.id)),
-  }));
+    .all(user.id, like, safe, prefix) as Row[];
+  return rows.map((row) => {
+    const id = Number(row.id);
+    return {
+      id,
+      username: String(row.username ?? ''),
+      avatarUrl: shareWorkspace(user.id, id) ? avatarUrl(id) : null,
+    };
+  });
 }
 
-export function lookupEmail(emailRaw: string): { found: boolean; email: string } | { error: string; status: number } {
-  return lookupPerson(emailRaw);
+export function publicLookup(queryRaw: string): { found: boolean } | { error: string; status: number } {
+  const query = queryRaw.trim();
+  if (!query) return { error: 'Indiquez un pseudo ou un e-mail.', status: 400 };
+  if (query.includes('@')) {
+    const email = normalizeEmail(query);
+    if (validateEmail(email)) return { error: 'Adresse e-mail invalide.', status: 400 };
+    return { found: true };
+  }
+  const found = findUserByLogin(query);
+  if (!found) return { error: 'Aucun compte avec ce pseudo.', status: 404 };
+  return { found: true };
 }

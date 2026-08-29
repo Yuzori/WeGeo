@@ -13,9 +13,9 @@ import { resizeAvatar } from '../lib/avatar';
 import { rememberSettingsFrom, settingsBackPath } from '../lib/nav';
 
 function formatSince(iso: string, locale: string): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '—';
+  if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleDateString(locale === 'en' ? 'en-GB' : 'fr-FR', {
     day: 'numeric',
     month: 'long',
@@ -108,8 +108,9 @@ export function SettingsPage() {
     }
   };
 
-  const planLabel =
-    user.subscriptionStatus === 'active' || user.subscriptionStatus === 'trialing'
+  const planLabel = user.developer
+    ? m.settings.planDeveloper
+    : user.hasAccess
       ? user.plan ?? m.settings.planActive
       : m.settings.planNone;
 

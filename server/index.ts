@@ -4,6 +4,7 @@ import compression from 'compression';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DEFAULT_OPTIONS, LEAD_STATUSES, type LeadStatus, type SearchOptions } from '../shared/types.ts';
+import type { PlanLimits } from '../shared/plans.ts';
 import * as db from './db.ts';
 import * as auth from './auth.ts';
 import * as billing from './billing.ts';
@@ -15,7 +16,7 @@ import { activeRunIds, cancelRun, getRun, resumeSearch, startSearch } from './se
 import { closeBrowser, warmUp } from './scraper/maps.ts';
 import { geocodeCity } from './scraper/geo.ts';
 import { locateRequest } from './locate.ts';
-import { rateLimit, sameOriginMutations, securityHeaders } from './security.ts';
+import { assertRuntimeSecrets, rateLimit, sameOriginMutations, securityHeaders } from './security.ts';
 
 const PORT = Number(process.env.PORT ?? 4319);
 const app = express();
@@ -57,17 +58,26 @@ function parseId(raw: string | string[] | undefined): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-function parseOptions(raw: unknown): SearchOptions {
+function parseOptions(raw: unknown, limits: PlanLimits): SearchOptions {
   const input = (raw ?? {}) as Partial<SearchOptions>;
+  const gridAllowed = limits.maxGridSize > 0;
+  const requestedMax = Number(input.maxPerDomain ?? DEFAULT_OPTIONS.maxPerDomain);
+  const maxPerDomain =
+    Number.isFinite(requestedMax) && requestedMax > 0
+      ? Math.min(limits.maxPerDomain, requestedMax)
+      : limits.maxPerDomain;
   return {
     onlyWithoutWebsite: Boolean(input.onlyWithoutWebsite ?? DEFAULT_OPTIONS.onlyWithoutWebsite),
     socialCountsAsNoWebsite: Boolean(input.socialCountsAsNoWebsite ?? DEFAULT_OPTIONS.socialCountsAsNoWebsite),
     deepCheck: Boolean(input.deepCheck ?? DEFAULT_OPTIONS.deepCheck),
     excludeHandled: Boolean(input.excludeHandled ?? DEFAULT_OPTIONS.excludeHandled),
     requirePhone: Boolean(input.requirePhone ?? DEFAULT_OPTIONS.requirePhone),
-    maxPerDomain: Math.max(0, Math.min(500, Number(input.maxPerDomain ?? DEFAULT_OPTIONS.maxPerDomain) || 0)),
-    gridMode: Boolean(input.gridMode ?? DEFAULT_OPTIONS.gridMode),
-    gridSize: Math.max(1, Math.min(6, Number(input.gridSize ?? DEFAULT_OPTIONS.gridSize) || 2)),
+    maxPerDomain,
+    gridMode: gridAllowed && Boolean(input.gridMode ?? DEFAULT_OPTIONS.gridMode),
+    gridSize: gridAllowed
+      ? Math.max(1, Math.min(limits.maxGridSize, Number(input.gridSize ?? DEFAULT_OPTIONS.gridSize) || 2))
+      : 2,
+    lookupDirigeant: limits.lookupDirigeant,
   };
 }
 
@@ -190,14 +200,17 @@ api.get('/auth/stats', auth.requireUser, (_req, res) => {
   res.json(auth.accountStats(auth.currentUser(res).id));
 });
 
-api.get('/avatars/:id', (req, res) => {
+api.get('/avatars/:id', auth.requireUser, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) return res.status(404).end();
-  const buffer = readAvatar(id);
-  if (!buffer) return res.status(404).end();
-  res.setHeader('Content-Type', 'image/jpeg');
+  const me = auth.currentUser(res);
+  if (id !== me.id && !workspaces.shareWorkspace(me.id, id)) return res.status(404).end();
+  const file = readAvatar(id);
+  if (!file) return res.status(404).end();
+  const types = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as const;
+  res.setHeader('Content-Type', types[file.kind]);
   res.setHeader('Cache-Control', 'private, max-age=86400');
-  res.end(buffer);
+  res.end(file.buffer);
 });
 
 /* ----------------------------------------------------------------- sessions */
@@ -220,12 +233,12 @@ api.get('/workspaces/invites', auth.requireUser, (_req, res) => {
 });
 
 api.post('/workspaces/lookup', auth.requireUser, rateLimit(30, 15 * 60 * 1000), (req, res) => {
-  const result = workspaces.lookupPerson(String(req.body?.query ?? req.body?.email ?? ''));
+  const result = workspaces.publicLookup(String(req.body?.query ?? req.body?.email ?? ''));
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.json(result);
 });
 
-api.get('/workspaces/people', auth.requireUser, rateLimit(60, 60 * 1000), (req, res) => {
+api.get('/workspaces/people', auth.requireUser, auth.requirePaid, rateLimit(20, 60 * 1000), (req, res) => {
   res.json({
     people: workspaces.searchPeople(auth.currentUser(res), String(req.query.q ?? '')),
   });
@@ -279,7 +292,7 @@ api.post('/workspaces/:id/leave', auth.requireUser, (req, res) => {
   res.json(result);
 });
 
-api.post('/workspaces/:id/invites', auth.requireUser, rateLimit(30, 60 * 60 * 1000), async (req, res) => {
+api.post('/workspaces/:id/invites', auth.requireUser, auth.requirePaid, rateLimit(30, 60 * 60 * 1000), async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   const result = await workspaces.invite(
@@ -328,19 +341,18 @@ api.post('/billing/confirm', auth.requireUser, rateLimit(20, 60 * 1000), async (
 
 /* ------------------------------------------------------------- recherches */
 
-api.post('/searches', auth.requireUser, workspaces.requireWorkspace, rateLimit(8, 60 * 1000), (req: Request, res: Response) => {
+api.post('/searches', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, rateLimit(8, 60 * 1000), (req: Request, res: Response) => {
   const user = auth.currentUser(res);
-  if (!auth.userHasAccess(user)) {
-    return res.status(402).json({ error: 'Un abonnement actif est requis pour lancer une recherche.' });
-  }
+  const limits = auth.planLimitsForUser(user);
 
   const city = String(req.body?.city ?? '').trim().slice(0, 120);
-  const domains = Array.isArray(req.body?.domains)
-    ? (req.body.domains as unknown[])
-        .map((d) => String(d).trim().slice(0, 80))
-        .filter(Boolean)
-        .slice(0, 20)
+  const incoming = Array.isArray(req.body?.domains)
+    ? (req.body.domains as unknown[]).map((d) => String(d).trim().slice(0, 80)).filter(Boolean)
     : [];
+  if (incoming.length > limits.maxDomains) {
+    return res.status(400).json({ error: `Votre offre permet ${limits.maxDomains} métiers par relevé.` });
+  }
+  const domains = incoming;
 
   if (!city) return res.status(400).json({ error: 'La ville est obligatoire.' });
   if (!domains.length) return res.status(400).json({ error: 'Indiquez au moins un métier à rechercher.' });
@@ -348,12 +360,12 @@ api.post('/searches', auth.requireUser, workspaces.requireWorkspace, rateLimit(8
     return res.status(409).json({ error: 'Une recherche est déjà en cours. Attendez la fin ou arrêtez-la.' });
   }
 
-  const searchId = startSearch({ city, domains, options: parseOptions(req.body?.options) }, workspaces.currentWorkspaceId(res), user.id);
+  const searchId = startSearch({ city, domains, options: parseOptions(req.body?.options, limits) }, workspaces.currentWorkspaceId(res), user.id);
   res.status(201).json({ searchId });
 });
 
 /** Flux d'évènements en direct pendant le scraping. */
-api.get('/searches/:id/stream', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.get('/searches/:id/stream', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   const search = db.getSearch(id, workspaces.currentWorkspaceId(res));
@@ -383,7 +395,7 @@ api.get('/searches/:id/stream', auth.requireUser, workspaces.requireWorkspace, (
   });
 });
 
-api.post('/searches/:id/cancel', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.post('/searches/:id/cancel', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   if (!db.getSearch(id, workspaces.currentWorkspaceId(res))) return res.status(404).json({ error: 'Recherche inconnue.' });
@@ -392,11 +404,7 @@ api.post('/searches/:id/cancel', auth.requireUser, workspaces.requireWorkspace, 
 });
 
 /** Repart d'une recherche arrêtée, en sautant les métiers déjà parcourus. */
-api.post('/searches/:id/resume', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
-  const user = auth.currentUser(res);
-  if (!auth.userHasAccess(user)) {
-    return res.status(402).json({ error: 'Un abonnement actif est requis pour lancer une recherche.' });
-  }
+api.post('/searches/:id/resume', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   if (activeRunIds().length >= 1) {
     return res.status(409).json({ error: 'Une recherche est déjà en cours. Attendez la fin ou arrêtez-la.' });
   }
@@ -404,21 +412,21 @@ api.post('/searches/:id/resume', auth.requireUser, workspaces.requireWorkspace, 
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   if (!resumeSearch(id, workspaces.currentWorkspaceId(res))) {
-    return res.status(409).json({ error: 'Cette recherche ne peut pas être reprise : elle est déjà complète.' });
+    return res.status(409).json({ error: 'Cette recherche ne peut pas être reprise. Elle est déjà complète.' });
   }
   res.json({ searchId: id });
 });
 
-api.get('/searches', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+api.get('/searches', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (_req: Request, res: Response) => {
   res.json(db.listSearches(workspaces.currentWorkspaceId(res), 200));
 });
 
-api.get('/searches/active', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+api.get('/searches/active', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (_req: Request, res: Response) => {
   const workspaceId = workspaces.currentWorkspaceId(res);
   res.json({ ids: activeRunIds().filter((id) => db.getSearch(id)?.workspaceId === workspaceId) });
 });
 
-api.get('/searches/:id/leads', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.get('/searches/:id/leads', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   const workspaceId = workspaces.currentWorkspaceId(res);
@@ -426,7 +434,7 @@ api.get('/searches/:id/leads', auth.requireUser, workspaces.requireWorkspace, (r
   res.json(db.listLeads({ workspaceId, searchId: id }));
 });
 
-api.get('/searches/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.get('/searches/:id', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   const search = db.getSearch(id, workspaces.currentWorkspaceId(res));
@@ -434,7 +442,7 @@ api.get('/searches/:id', auth.requireUser, workspaces.requireWorkspace, (req: Re
   res.json(search);
 });
 
-api.delete('/searches/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.delete('/searches/:id', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   if (!db.deleteSearch(id, workspaces.currentWorkspaceId(res))) {
@@ -460,11 +468,11 @@ function parseFilters(req: Request, workspaceId: number): db.LeadFilters {
   };
 }
 
-api.get('/leads', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.get('/leads', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   res.json(db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res))));
 });
 
-api.patch('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.patch('/leads/:id', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, rateLimit(60, 60 * 1000), (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   const workspaceId = workspaces.currentWorkspaceId(res);
@@ -483,7 +491,7 @@ api.patch('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Req
   res.json(lead);
 });
 
-api.post('/leads/bulk', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.post('/leads/bulk', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, rateLimit(30, 60 * 1000), (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.ids)
     ? (req.body.ids as unknown[])
         .map(Number)
@@ -500,7 +508,7 @@ api.post('/leads/bulk', auth.requireUser, workspaces.requireWorkspace, (req: Req
   res.status(400).json({ error: 'Action inconnue.' });
 });
 
-api.delete('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Request, res: Response) => {
+api.delete('/leads/:id', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
   if (!db.deleteLead(id, workspaces.currentWorkspaceId(res))) {
@@ -511,7 +519,7 @@ api.delete('/leads/:id', auth.requireUser, workspaces.requireWorkspace, (req: Re
 
 /* -------------------------------------------------------------- métadonnées */
 
-api.get('/meta', auth.requireUser, workspaces.requireWorkspace, (_req: Request, res: Response) => {
+api.get('/meta', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (_req: Request, res: Response) => {
   const workspaceId = workspaces.currentWorkspaceId(res);
   res.json({
     stats: db.stats(workspaceId),
@@ -521,7 +529,7 @@ api.get('/meta', auth.requireUser, workspaces.requireWorkspace, (_req: Request, 
   });
 });
 
-api.get('/geocode', auth.requireUser, rateLimit(30, 60 * 1000), async (req: Request, res: Response) => {
+api.get('/geocode', auth.requireUser, auth.requirePaid, rateLimit(30, 60 * 1000), async (req: Request, res: Response) => {
   const city = String(req.query.city ?? '').trim().slice(0, 120);
   if (!city) return res.status(400).json({ error: 'Ville manquante.' });
   res.json(await geocodeCity(city));
@@ -529,7 +537,7 @@ api.get('/geocode', auth.requireUser, rateLimit(30, 60 * 1000), async (req: Requ
 
 /* ------------------------------------------------------------------ exports */
 
-api.get('/export/:format', auth.requireUser, workspaces.requireWorkspace, async (req: Request, res: Response) => {
+api.get('/export/:format', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, async (req: Request, res: Response) => {
   const format = req.params.format;
   const leads = db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res)));
   const label = typeof req.query.status === 'string' ? req.query.status.slice(0, 40) : 'prospects';
@@ -558,8 +566,11 @@ api.get('/export/:format', auth.requireUser, workspaces.requireWorkspace, async 
   res.status(400).json({ error: 'Format non pris en charge.' });
 });
 
-api.post('/export/sheets', auth.requireUser, workspaces.requireWorkspace, rateLimit(8, 60 * 60 * 1000), async (req, res) => {
+api.post('/export/sheets', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, rateLimit(8, 60 * 60 * 1000), async (req, res) => {
   const user = auth.currentUser(res);
+  if (!auth.planLimitsForUser(user).exportSheets) {
+    return res.status(402).json({ error: 'L’export Google Sheets est réservé aux offres Pro et Agence.' });
+  }
   if (!user.googleRefreshToken) {
     return res.status(409).json({ error: 'Connectez Google pour envoyer le tableur dans Sheets.' });
   }
@@ -571,7 +582,7 @@ api.post('/export/sheets', auth.requireUser, workspaces.requireWorkspace, rateLi
     const accessToken = await googleAccessToken(user.googleRefreshToken, req);
     const sheet = await createGoogleSheet({
       accessToken,
-      title: `Prospy — ${label} — ${stamp}`,
+      title: `Prospy. ${label}. ${stamp}`,
       leads,
     });
     res.json(sheet);
@@ -598,6 +609,8 @@ if (existsSync(webDist)) {
   });
 }
 
+assertRuntimeSecrets();
+
 const server = app.listen(PORT, () => {
   console.log(`Prospy API prête sur http://localhost:${PORT}`);
   if (process.env.NODE_ENV !== 'production') {
@@ -608,11 +621,12 @@ const server = app.listen(PORT, () => {
   } else if (!existsSync(webDist)) {
     console.log("Interface : lancez « npm run dev » puis ouvrez http://localhost:5173");
   }
-  if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
-    console.warn('SESSION_SECRET manquant : définissez-le en production.');
-  }
-      if (!process.env.STRIPE_SECRET_KEY) {
-    console.log('Stripe non configuré : les recherches restent ouvertes sans abonnement (mode développement).');
+  if (!process.env.STRIPE_SECRET_KEY?.trim()) {
+    if (process.env.NODE_ENV === 'production') {
+      console.log('Stripe non configuré : l’outil est fermé, sauf comptes listés dans DEV_ACCOUNT_EMAILS.');
+    } else {
+      console.log('Stripe non configuré : accès ouvert en local (hors production).');
+    }
   }
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
     console.log('Google OAuth non configuré : le bouton Google reste masqué.');

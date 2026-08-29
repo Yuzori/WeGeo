@@ -122,7 +122,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
 
   useEffect(() => {
     const title = mode === 'login' ? m.auth.loginTitle : mode === 'register' ? m.auth.registerTitle : m.auth.forgotTitle;
-    document.title = `${title} — Prospy`;
+    document.title = `${title}. Prospy`;
   }, [mode, m]);
 
   useEffect(() => {
@@ -219,16 +219,14 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
           : m.auth.forgotLead;
 
   return (
-    <div className="landing">
+    <div className="landing auth-page">
       <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-3 py-10 sm:px-4 sm:py-12">
         <div className="mb-8 flex items-center justify-between">
-          <Link to="/" className="inline-flex items-center gap-2 self-start">
-            <BrandMark alt="Prospy" className="h-10 w-10" />
-          </Link>
+          <BrandMark alt="Prospy" className="h-10 w-10" />
           <LangSwitch />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <p className="mt-2 text-sm text-muted">{lead}</p>
+        <h1 className="auth-title text-2xl font-semibold tracking-tight">{title}</h1>
+        <p className="auth-lead mt-2 text-sm text-muted">{lead}</p>
 
         {google && step === 'form' && mode !== 'forgot' && (
           <>
@@ -406,7 +404,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
         )}
 
         {mode !== 'forgot' && (
-          <p className="mt-6 text-sm text-muted">
+          <p className="auth-switch mt-6 text-sm text-muted">
             {mode === 'login' ? (
               <>
                 {m.auth.noAccount}{' '}

@@ -30,7 +30,7 @@ function formatDate(iso: string): string {
 }
 
 function formatDuration(ms: number | null): string {
-  if (!ms) return '—';
+  if (!ms) return '-';
   const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} s`;
   return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')}`;
@@ -156,7 +156,7 @@ export function HistoryPage({ onReplay }: { onReplay: (search: SearchRecord) => 
                   </Button>
                   {isResumable(search) && (
                     <IconButton
-                      label={`Reprendre : ${(search.totalTasks ?? 0) - search.doneTasks} métier(s) restant(s)`}
+                      label={`Reprendre. ${(search.totalTasks ?? 0) - search.doneTasks} métier(s) restant(s)`}
                       tone="green"
                       motion="pop"
                       onClick={() => resume(search)}

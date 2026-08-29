@@ -36,7 +36,7 @@ export function SessionsPage() {
   };
 
   useEffect(() => {
-    document.title = 'Sessions — Prospy';
+    document.title = 'Sessions. Prospy';
     refresh();
     api
       .authMethods()
@@ -79,13 +79,11 @@ export function SessionsPage() {
       <div className="mx-auto max-w-3xl px-4 py-12 sm:px-8">
         <header className="mb-10 flex items-start justify-between gap-4">
           <div>
-            <Link to="/" className="mb-6 inline-flex">
-              <BrandMark alt="Prospy" className="h-10 w-10" />
-            </Link>
+            <BrandMark alt="Prospy" className="mb-6 h-10 w-10" />
             <p className="legend mb-2">vos sessions</p>
             <h1 className="text-[1.45rem] leading-tight font-semibold tracking-tight text-balance sm:text-[2rem]">Où travaillez-vous aujourd’hui ?</h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
-              Une session isole les recherches et les favoris. Seul, avec un associé, ou pour un client : vous changez
+              Une session isole les recherches et les favoris. Seul, avec un associé, ou pour un client. Vous changez
               d’espace sans mélanger les fiches.
             </p>
           </div>
@@ -199,7 +197,7 @@ export function SessionsPage() {
           <p className="mt-10 max-w-xl text-xs leading-relaxed text-faint">
             {!google && (
               <>
-                Google n’est pas branché : ajoutez <code className="text-muted">GOOGLE_CLIENT_ID</code> et{' '}
+                Google n’est pas branché. Ajoutez <code className="text-muted">GOOGLE_CLIENT_ID</code> et{' '}
                 <code className="text-muted">GOOGLE_CLIENT_SECRET</code> dans <code className="text-muted">.env</code>,
                 avec l’URI <code className="text-muted">http://localhost:5173/api/auth/google/callback</code>.{' '}
               </>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { Lead } from '../../shared/types';
 import { api } from '../api';
+import { useAuth, userLimits } from '../auth';
 import { formatPhone } from '../lib/lead';
 import { cx, useToast } from './ui';
 import { sessionPath } from '../workspace';
@@ -51,6 +52,7 @@ export function CommandPalette({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const notify = useToast();
   const [query, setQuery] = useState('');
   const [matches, setMatches] = useState<Lead[]>([]);
@@ -85,11 +87,21 @@ export function CommandPalette({
     };
 
     const base = workspaceId ? sessionPath(workspaceId) : '/app';
-    return [
+    const list: Action[] = [
       { id: 'sessions', label: 'Mes sessions', hint: 'Changer d’espace', icon: <Layers className="size-4" />, run: goto('/app') },
       { id: 'search', label: 'Nouvelle recherche', hint: 'Lancer un balayage', icon: <Search className="size-4" />, run: goto(base) },
       { id: 'tri', label: 'À trier', hint: 'Prospects non classés', icon: <Inbox className="size-4" />, run: goto(`${base}/a-trier`) },
-      { id: 'appels', label: 'Session d’appels', hint: 'Une fiche à la fois', icon: <Phone className="size-4" />, run: goto(`${base}/appels`) },
+    ];
+    if (userLimits(user).mapAndCalls) {
+      list.push({
+        id: 'appels',
+        label: 'Session d’appels',
+        hint: 'Une fiche à la fois',
+        icon: <Phone className="size-4" />,
+        run: goto(`${base}/appels`),
+      });
+    }
+    list.push(
       { id: 'fav', label: 'Favoris', hint: 'À appeler', icon: <Star className="size-4" />, run: goto(`${base}/favoris`) },
       { id: 'signe', label: 'Signés', icon: <Check className="size-4" />, run: goto(`${base}/signes`) },
       { id: 'perdu', label: 'Non conclus', icon: <ThumbsDown className="size-4" />, run: goto(`${base}/non-conclus`) },
@@ -114,8 +126,9 @@ export function CommandPalette({
           onClose();
         },
       },
-    ];
-  }, [location.hash, location.pathname, location.search, navigate, onClose, workspaceId]);
+    );
+    return list;
+  }, [location.hash, location.pathname, location.search, navigate, onClose, user, workspaceId]);
 
   const filtered = useMemo(() => {
     const q = fold(query.trim());
@@ -139,7 +152,7 @@ export function CommandPalette({
     const { lead } = row;
     if (lead.phone) {
       navigator.clipboard.writeText(lead.phone).then(
-        () => notify(`${lead.name} — numéro copié`, 'info'),
+        () => notify(`${lead.name}. Numéro copié`, 'info'),
         () => window.open(lead.mapsUrl, '_blank'),
       );
     } else {

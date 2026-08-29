@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { ChevronDown, MapPin, Plus, Search, SlidersHorizontal, Square, X } from 'lucide-react';
 import type { SearchOptions } from '../../shared/types';
+import { useAuth, userLimits } from '../auth';
 import { Button, Spinner, Toggle, cx } from './ui';
 
 /** Métiers les plus rentables à prospecter : peu digitalisés, à forte marge. */
@@ -99,7 +100,7 @@ function ResolvedZone({ city }: { city: string }) {
       ) : (
         <>
           <MapPin className="mt-px size-2.5 shrink-0" />
-          commune introuvable — précisez le département
+          commune introuvable. Précisez le département
         </>
       )}
     </p>
@@ -131,6 +132,8 @@ export function SearchForm({
   onCancel,
   knownCities,
 }: SearchFormProps) {
+  const { user } = useAuth();
+  const limits = userLimits(user);
   const [draft, setDraft] = useState('');
   const [showOptions, setShowOptions] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -138,13 +141,21 @@ export function SearchForm({
   const addDomain = (value: string) => {
     const clean = value.trim().toLowerCase();
     if (!clean) return;
-    if (!domains.includes(clean)) onDomains([...domains, clean]);
+    if (domains.includes(clean)) {
+      setDraft('');
+      return;
+    }
+    if (domains.length >= limits.maxDomains) return;
+    onDomains([...domains, clean]);
     setDraft('');
   };
 
   const addPack = (list: string[]) => {
     const merged = [...domains];
-    for (const domain of list) if (!merged.includes(domain)) merged.push(domain);
+    for (const domain of list) {
+      if (merged.length >= limits.maxDomains) break;
+      if (!merged.includes(domain)) merged.push(domain);
+    }
     onDomains(merged);
   };
 
@@ -224,7 +235,11 @@ export function SearchForm({
         <div>
           <label className="legend mb-1.5 block" htmlFor="metier">
             métiers à relever
-            {domains.length > 0 && <span className="ml-1 text-lime-deep">· {domains.length}</span>}
+            {domains.length > 0 && (
+              <span className="ml-1 text-lime-deep">
+                · {domains.length}/{limits.maxDomains}
+              </span>
+            )}
           </label>
           <div
             className={cx(
@@ -256,6 +271,7 @@ export function SearchForm({
               onBlur={() => addDomain(draft)}
               placeholder={domains.length ? 'ajouter…' : 'coiffeur, plombier, restaurant…'}
               autoComplete="off"
+              disabled={domains.length >= limits.maxDomains}
               className="min-w-0 flex-1 bg-transparent px-1.5 py-1 text-sm outline-none placeholder:text-faint sm:min-w-[9rem]"
             />
           </div>
@@ -298,7 +314,7 @@ export function SearchForm({
               key={pack.label}
               type="button"
               onClick={() => addPack(pack.domains)}
-              disabled={complete}
+              disabled={complete || domains.length >= limits.maxDomains}
               title={pack.domains.join(', ')}
               className={cx(
                 'inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition-all duration-150',
@@ -333,6 +349,7 @@ export function SearchForm({
       )}
 
       {/* Options avancées */}
+      {limits.extendedOptions && (
       <div className="mt-4 border-t border-rule pt-3">
         <button
           type="button"
@@ -351,7 +368,7 @@ export function SearchForm({
               checked={options.onlyWithoutWebsite}
               onChange={(v) => set('onlyWithoutWebsite', v)}
               label="Uniquement sans site web"
-              hint="Le cœur de Prospy : on écarte les entreprises déjà équipées."
+              hint="Le cœur de Prospy. On écarte les entreprises déjà équipées."
             />
             <Toggle
               checked={options.socialCountsAsNoWebsite}
@@ -377,24 +394,30 @@ export function SearchForm({
               label="Seulement avec un numéro"
               hint="Écarte les fiches impossibles à appeler."
             />
+            {limits.maxGridSize > 0 && (
             <Toggle
               checked={options.gridMode}
               onChange={(v) => set('gridMode', v)}
               label="Quadrillage de la ville"
               hint="Découpe la zone en secteurs pour dépasser la limite d'environ 120 résultats. Utile sur les grandes villes."
             />
+            )}
 
-            {options.gridMode && (
+            {limits.maxGridSize > 0 && options.gridMode && (
               <label className="flex items-center gap-3 px-2 py-2 text-sm text-muted">
                 <span className="shrink-0">Secteurs</span>
                 <select
-                  value={options.gridSize}
+                  value={Math.min(options.gridSize, limits.maxGridSize)}
                   onChange={(e) => set('gridSize', Number(e.target.value))}
                   className="field h-9 w-auto py-1"
                 >
-                  <option value={2}>4 (2×2)</option>
-                  <option value={3}>9 (3×3)</option>
-                  <option value={4}>16 (4×4)</option>
+                  {([2, 3, 4, 5] as const)
+                    .filter((size) => size <= limits.maxGridSize)
+                    .map((size) => (
+                      <option key={size} value={size}>
+                        {size * size} ({size}×{size})
+                      </option>
+                    ))}
                 </select>
               </label>
             )}
@@ -402,19 +425,28 @@ export function SearchForm({
             <label className="flex items-center gap-3 px-2 py-2 text-sm text-muted">
               <span className="shrink-0">Limite par métier</span>
               <select
-                value={options.maxPerDomain}
+                value={
+                  options.maxPerDomain <= 0 || options.maxPerDomain > limits.maxPerDomain
+                    ? limits.maxPerDomain
+                    : options.maxPerDomain
+                }
                 onChange={(e) => set('maxPerDomain', Number(e.target.value))}
                 className="field h-9 w-auto py-1"
               >
-                <option value={0}>Toutes les fiches</option>
-                <option value={20}>20 fiches</option>
-                <option value={50}>50 fiches</option>
-                <option value={100}>100 fiches</option>
+                {[20, 50, 100, 250, 500, 1000]
+                  .filter((n) => n < limits.maxPerDomain)
+                  .map((n) => (
+                    <option key={n} value={n}>
+                      {n} fiches
+                    </option>
+                  ))}
+                <option value={limits.maxPerDomain}>Jusqu’à {limits.maxPerDomain}</option>
               </select>
             </label>
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

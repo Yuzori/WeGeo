@@ -294,7 +294,7 @@ function sitOn(el: HTMLElement, lines: Record<string, string>, mode: 'strict' | 
       y: r.top + r.height / 2,
       s: navSize(),
       kind,
-      line: lines.home,
+      line: '',
       top: r.top,
       off: !inView,
     };
@@ -315,8 +315,15 @@ function sitOn(el: HTMLElement, lines: Record<string, string>, mode: 'strict' | 
     x = r.right - 32;
     y = r.top + 20;
   } else if (kind === 'launch' || kind === 'cta') {
-    x = r.left + r.width * 0.5;
-    y = vis ? r.top + 8 : vh * 0.42;
+    const heading = el.querySelector('h2');
+    const hr = heading?.getBoundingClientRect();
+    if (hr && hr.height > 8) {
+      x = clamp(hr.left + 28, 64, window.innerWidth - 36);
+      y = hr.top + Math.min(22, hr.height * 0.28);
+    } else {
+      x = r.left + r.width * 0.5;
+      y = vis ? r.top + r.height * 0.28 : vh * 0.42;
+    }
   } else if (kind === 'pipeline' || kind === 'search' || kind === 'results' || kind === 'invite') {
     x = r.left + 56;
     y = r.top + 22;
@@ -354,7 +361,7 @@ function pickPerch(perches: Perch[], currentId: string, scrollY: number, rushing
   if (!spots.length) return home;
 
   const dock = spots.find((p) => p.kind === 'dock');
-  if (dock && !dock.off && dock.top < vh * 0.78) return dock;
+  if (dock && !dock.off) return dock;
 
   const inBand = (p: Perch) => p.kind !== 'dock' && !p.off && p.top > 100 && p.top < vh * 0.78;
   const vis = spots.filter(inBand);
@@ -415,24 +422,6 @@ function stirCopy(mx: number, my: number, radius: number, dt: number, rushing: b
       g.style.transform = `translate(${cur.x}px, ${cur.y}px)`;
     }
   }
-}
-
-function sayOverlap(ax: number, ay: number, aw: number, ah: number, ignore: HTMLElement | null, pad = 6): number {
-  const nodes = document.querySelectorAll<HTMLElement>(
-    'h1, h2, h3, .lp-h2, .lp-btn, .lp-command, .lp-chip, .lp-hero-lead, .lp-hero-ctas, .lp-frame, .lp-plan, .lp-feature, .lp-hero-mocks, .app-sidebar',
-  );
-  let area = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    const el = nodes[i];
-    if (ignore && (el === ignore || ignore.contains(el) || el.contains(ignore))) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 8 || r.height < 8) continue;
-    const ix = Math.max(0, Math.min(ax + aw, r.right + pad) - Math.max(ax, r.left - pad));
-    const iy = Math.max(0, Math.min(ay + ah, r.bottom + pad) - Math.max(ay, r.top - pad));
-    const heading = el.matches('h1, h2, h3, .lp-h2');
-    area += ix * iy * (heading ? 10 : 1);
-  }
-  return area;
 }
 
 function clearStir() {
@@ -539,10 +528,14 @@ export function LogoFlight({
     let clickSpeech = false;
     let fadeTimer = 0;
     let introTimer = 0;
+    let sayX = 12;
+    let sayY = 12;
+    let sayInited = false;
 
     const hushSay = () => {
       window.clearTimeout(fadeTimer);
       clickSpeech = false;
+      sayInited = false;
       say.classList.remove('is-out', 'is-on');
       say.textContent = '';
     };
@@ -647,7 +640,8 @@ export function LogoFlight({
         feature: lines.features,
         trust: lines.trust,
         plan: lines.pricing,
-        cta: lines.hero,
+        cta: lines.cta,
+        dock: lines.dock,
         logo: guide.steps.logo,
         search: guide.steps.search,
         launch: g ? guide.steps.launch : lines.product,
@@ -693,9 +687,22 @@ export function LogoFlight({
       pos.y = smoothTo(pos.y, flightTo.y + idleY - lift, dt, tau);
       pos.s = smoothTo(pos.s, flightTo.s, dt, flying ? 0.16 : 0.24);
 
+      if (perch?.kind === 'dock' && (say.textContent || clickSpeech)) hushSay();
+
       if (!flying && !parked && destId !== spokenFor && perch?.line) {
         spokenFor = destId;
         speak(perch.line);
+      }
+
+      if (clickSpeech) {
+        const clicks = lines.click;
+        if (clicks.length) {
+          const nextClick = clicks[(clickI - 1 + clicks.length) % clicks.length];
+          if (say.textContent !== nextClick) speak(nextClick, true);
+        }
+      } else if (say.textContent && !say.classList.contains('is-out') && perch?.kind !== 'dock') {
+        const wanted = g === 'logo' && destId === 'home' ? guide.steps.logo : perch?.line;
+        if (wanted && say.textContent !== wanted) speak(wanted);
       }
 
       if (!reduced && !flying) {
@@ -784,41 +791,36 @@ export function LogoFlight({
       const talking = (!menuOpen || guiding) && (Boolean(say.textContent) || fading);
       say.classList.toggle('is-on', talking);
       if (talking) {
-        const pad = 10;
+        const pad = 12;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
         const w = Math.max(40, say.offsetWidth);
         const h = Math.max(24, say.offsetHeight);
-        const gap = pos.s * 0.7 + 14;
-        let left: number;
-        let top: number;
-        if (parked) {
-          left = clamp(drawX - w / 2, pad, Math.max(pad, vw - w - pad));
-          top = clamp(drawY + Math.max(20, pos.s * 0.55), pad, Math.max(pad, vh - h - pad));
+        const gap = Math.max(10, pos.s * 0.16);
+        const leftSlot = drawX - pos.s * 0.42 - gap - w;
+        const fromRight = leftSlot >= pad;
+        const targetLeft = clamp(
+          fromRight ? leftSlot : drawX + pos.s * 0.42 + gap,
+          pad,
+          Math.max(pad, vw - w - pad),
+        );
+        let targetTop = drawY - h * 0.45;
+        if (targetTop < pad + 8) targetTop = drawY - h * 0.12;
+        targetTop = clamp(targetTop, pad, Math.max(pad, vh - h - pad));
+        if (!sayInited) {
+          sayX = targetLeft;
+          sayY = targetTop;
+          sayInited = true;
         } else {
-          const below = { left: drawX - w / 2, top: drawY + Math.max(22, pos.s * 0.62) };
-          const above = { left: drawX - w / 2, top: drawY - pos.s * 0.62 - h };
-          const right = { left: drawX + gap, top: drawY - h * 0.5 };
-          const leftSide = { left: drawX - gap - w, top: drawY - h * 0.5 };
-          const spots = vw < 720 ? [below, above, right, leftSide] : [right, leftSide, below, above];
-          left = spots[0].left;
-          top = spots[0].top;
-          let best = Number.POSITIVE_INFINITY;
-          for (const spot of spots) {
-            const l = clamp(spot.left, pad, Math.max(pad, vw - w - pad));
-            const t = clamp(spot.top, pad, Math.max(pad, vh - h - pad));
-            const score = sayOverlap(l, t, w, h, perch?.el ?? null);
-            if (score < best) {
-              best = score;
-              left = l;
-              top = t;
-              if (score === 0) break;
-            }
-          }
+          const k = 1 - Math.exp(-dt / 0.2);
+          sayX += (targetLeft - sayX) * k;
+          sayY += (targetTop - sayY) * k;
         }
-        say.style.left = `${left}px`;
-        say.style.top = `${top}px`;
+        say.style.left = `${sayX}px`;
+        say.style.top = `${sayY}px`;
         if (!fading) say.style.transform = 'none';
+        say.classList.toggle('is-from-right', fromRight);
+        say.classList.toggle('is-from-left', !fromRight);
       }
       say.classList.toggle('is-nav-say', parked);
       say.classList.toggle('is-guide-say', guiding);

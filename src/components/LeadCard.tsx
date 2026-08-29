@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Lead, LeadStatus } from '../../shared/types';
+import { useAuth, userLimits } from '../auth';
 import { TIER_COLORS, formatCoords, hueOf, initials, potential, tierLabel } from '../lib/lead';
 import { DirigeantLine } from './DirigeantLine';
 import { IconButton, Tag, cx, useToast } from './ui';
@@ -95,7 +96,7 @@ function PotentialGauge({ lead }: { lead: Lead }) {
 
   return (
     <span
-      title={`Potentiel ${score}/100 — ${tierLabel(tier)} · ${reasons.join(' · ')}`}
+      title={`Potentiel ${score}/100. ${tierLabel(tier)} · ${reasons.join(' · ')}`}
       className="inline-flex shrink-0 items-center gap-1.5 rounded border border-rule bg-card-2 px-1.5 py-1"
     >
       <span className="flex items-end gap-[2px]" aria-hidden>
@@ -136,6 +137,7 @@ export function LeadCard({
   index = 0,
 }: LeadCardProps) {
   const notify = useToast();
+  const limits = userLimits(useAuth().user);
   const [notesOpen, setNotesOpen] = useState(false);
   const [draft, setDraft] = useState(lead.notes ?? '');
   const [armed, setArmed] = useState(false);
@@ -311,19 +313,19 @@ export function LeadCard({
                   </span>
                 )}
                 {!sameLabel(lead.category, lead.domain) && lead.domain && (
-                  <span className="text-faint">recherché : {lead.domain}</span>
+                  <span className="text-faint">recherché · {lead.domain}</span>
                 )}
               </p>
             </div>
 
             <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
               <div className="flex items-center gap-0.5">{actions}</div>
-              <PotentialGauge lead={lead} />
+              {limits.mapAndCalls && <PotentialGauge lead={lead} />}
             </div>
           </div>
 
           <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
-            <DirigeantLine lead={lead} />
+            {limits.lookupDirigeant && <DirigeantLine lead={lead} />}
 
             <div className="min-w-0">
               <p className="legend">contact</p>

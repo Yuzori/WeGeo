@@ -59,7 +59,7 @@ export function potential(lead: Lead): Potential {
   if (reviews > 0) {
     // Échelle logarithmique : passer de 5 à 50 avis compte plus que de 300 à 350.
     score += Math.min(50, Math.round((Math.log10(reviews + 1) / Math.log10(501)) * 50));
-    if (reviews >= 150) reasons.push(`${reviews} avis : clientèle installée`);
+    if (reviews >= 150) reasons.push(`${reviews} avis. Clientèle installée`);
     else if (reviews >= 30) reasons.push(`${reviews} avis`);
     else reasons.push(`Peu d’avis (${reviews})`);
   } else {

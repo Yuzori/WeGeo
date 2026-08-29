@@ -8,7 +8,7 @@ const KEY = 'prospy.lang';
 
 const copy = {
   fr: {
-    title: 'Prospy — Trouvez les commerces sans site web',
+    title: 'Prospy. Trouvez les commerces sans site web',
     nav: {
       product: 'Produit',
       features: 'Fonctionnalités',
@@ -26,7 +26,7 @@ const copy = {
       chip: 'prospection locale',
       h1a: 'Trouvez les commerces',
       h1b: 'sans site web.',
-      lead: 'Prospy parcourt Google Maps métier par métier, écarte les entreprises déjà en ligne, et range le reste dans un pipeline d’appels — jusqu’à la signature.',
+      lead: 'Prospy parcourt Google Maps métier par métier, écarte les entreprises déjà en ligne, et range le reste dans un pipeline d’appels jusqu’à la signature.',
       cta: 'Commencer',
       see: 'Voir l’outil',
       leadShort: 'Un relevé Google Maps, uniquement les commerces sans site. Ensuite vous appelez, depuis le pipeline.',
@@ -83,7 +83,7 @@ const copy = {
           why: 'Le relevé sort de l’outil dès que vous en avez besoin.',
         },
       ],
-      why: 'Pourquoi c’est utile —',
+      why: 'Pourquoi c’est utile.',
     },
     launch: {
       chip: 'lancer un relevé',
@@ -121,9 +121,8 @@ const copy = {
     pricing: {
       chip: 'tarifs',
       h2: 'Un abonnement, un outil.',
-      lead: 'Chaque offre enlève ou débloque des plafonds (relevés, réglages, équipe, nom du dirigeant). Les prix ci-dessous sont ceux prévus. Stripe n’est pas encore branché : rien n’est limité dans l’outil pour le moment.',
+      lead: 'Chaque offre enlève ou débloque des plafonds (relevés, réglages, équipe, nom du dirigeant).',
       month: 'par mois',
-      stripeOff: 'Le paiement Stripe viendra ensuite. Les croix décrivent l’offre, elles ne sont pas encore appliquées.',
     },
     cta: {
       h2: 'Passez du balayage Maps à la liste d’appels.',
@@ -135,6 +134,9 @@ const copy = {
       newSearch: 'nouvelle recherche',
       runSurvey: 'Lancer le relevé',
       noSite: 'sans site · 47',
+      pipeline: 'pipeline · ce soir',
+      toSort: 'à trier',
+      calling: 'à appeler',
       favorites: 'favoris · à appeler',
       noSiteTag: 'sans site',
       signed: 'Signé',
@@ -162,10 +164,12 @@ const copy = {
     mascot: {
       home: 'Je te fais le tour de l’outil.',
       hero: 'Ceux-là n’ont pas de site. C’est eux qu’on appelle.',
-      product: 'Une ville, des métiers : une liste d’appels.',
+      product: 'Une ville, des métiers. Une liste d’appels.',
       features: 'Relevé, pipeline, appels, export. Rien d’autre.',
       trust: 'Tes fiches restent sur ton compte. Point.',
       pricing: 'Starter bride le relevé. Pro débloque le dirigeant. Agence, plus de plafond.',
+      cta: 'Tu crées le compte. Ensuite on lance le relevé.',
+      dock: 'Le tour est fait. Le compte, c’est le bouton au-dessus.',
       click: [
         'On lance un relevé ?',
         'Je ne retiens que les sans-site.',
@@ -183,7 +187,7 @@ const copy = {
         launch: 'Tu lances. Je ne garde que les commerces sans site.',
         results: 'Les fiches arrivent ici. L’étoile, c’est à appeler.',
         pipeline: 'À trier, favoris, signés. Ton pipeline est là.',
-        invite: 'Ici tu invites un associé : pseudo ou e-mail, puis la flèche.',
+        invite: 'Ici tu invites un associé. Pseudo ou e-mail, puis la flèche.',
       },
     },
     auth: {
@@ -235,7 +239,7 @@ const copy = {
       back: 'Retour',
     },
     settings: {
-      docTitle: 'Compte — Prospy',
+      docTitle: 'Compte. Prospy',
       kicker: 'votre compte',
       title: 'Réglages',
       lead: 'Photo, pseudo, langue, apparence. Ce qui vous identifie dans les sessions partagées.',
@@ -258,7 +262,7 @@ const copy = {
       saveFail: 'Enregistrement impossible.',
       photoUpdated: 'Photo mise à jour.',
       photoFail: 'Photo illisible.',
-      photoRemoved: 'Photo retirée : l’initiale du pseudo s’affiche.',
+      photoRemoved: 'Photo retirée. L’initiale du pseudo s’affiche.',
       photoRemoveFail: 'Impossible de retirer la photo.',
       prefs: 'Préférences',
       appearance: 'Apparence',
@@ -273,6 +277,7 @@ const copy = {
       billing: 'Abonnement',
       planActive: 'actif',
       planNone: 'aucun abonnement',
+      planDeveloper: 'compte développeur',
       memberSince: 'Membre depuis {date}',
       manageBilling: 'Gérer l’abonnement',
       shortcuts: 'Raccourcis',
@@ -299,7 +304,7 @@ const copy = {
     },
   },
   en: {
-    title: 'Prospy — Find local businesses with no website',
+    title: 'Prospy. Find local businesses with no website',
     nav: {
       product: 'Product',
       features: 'Features',
@@ -317,10 +322,10 @@ const copy = {
       chip: 'local prospecting',
       h1a: 'Find the businesses',
       h1b: 'with no website.',
-      lead: 'Prospy walks Google Maps trade by trade, drops companies that already have a real site, and files the rest into a call pipeline — through to the signature.',
+      lead: 'Prospy walks Google Maps trade by trade, drops companies that already have a real site, and files the rest into a call pipeline through to the signature.',
       cta: 'Get started',
       see: 'See the tool',
-      leadShort: 'A Google Maps survey — only businesses with no website. Then you call, from the pipeline.',
+      leadShort: 'A Google Maps survey. Only businesses with no website. Then you call, from the pipeline.',
     },
     steps: [
       {
@@ -374,7 +379,7 @@ const copy = {
           why: 'The survey leaves the tool as soon as you need it.',
         },
       ],
-      why: 'Why it helps —',
+      why: 'Why it helps.',
     },
     launch: {
       chip: 'run a survey',
@@ -412,9 +417,8 @@ const copy = {
     pricing: {
       chip: 'pricing',
       h2: 'One subscription, one tool.',
-      lead: 'Each plan caps or unlocks survey volume, settings, team invites, and owner names. Prices below are the intended ones. Stripe is not wired yet, so nothing is limited in the tool for now.',
+      lead: 'Each plan caps or unlocks survey volume, settings, team invites, and owner names.',
       month: 'per month',
-      stripeOff: 'Stripe checkout comes later. The crossed items describe the offer; they are not enforced yet.',
     },
     cta: {
       h2: 'Go from scanning Maps to a call list.',
@@ -426,6 +430,9 @@ const copy = {
       newSearch: 'new search',
       runSurvey: 'Run the survey',
       noSite: 'no website · 47',
+      pipeline: 'pipeline · tonight',
+      toSort: 'to sort',
+      calling: 'to call',
       favorites: 'starred · to call',
       noSiteTag: 'no website',
       signed: 'Signed',
@@ -453,10 +460,12 @@ const copy = {
     mascot: {
       home: 'I’ll walk you through the tool.',
       hero: 'These have no website. They’re the ones you call.',
-      product: 'A city, some trades: a call list.',
+      product: 'A city, some trades. A call list.',
       features: 'Survey, pipeline, calls, export. That’s it.',
       trust: 'Your cards stay on your account. Full stop.',
       pricing: 'Starter caps the survey. Pro unlocks the owner name. Agency lifts the ceiling.',
+      cta: 'Create the account. Then we run the survey.',
+      dock: 'That’s the tour. The account is the button above.',
       click: [
         'Run a survey?',
         'I only keep shops with no site.',
@@ -474,7 +483,7 @@ const copy = {
         launch: 'You start it. I only keep shops with no website.',
         results: 'Cards land here. Star them to call later.',
         pipeline: 'Inbox, favorites, signed. Your pipeline is here.',
-        invite: 'Invite a teammate here: username or email, then the arrow.',
+        invite: 'Invite a teammate here. Username or email, then the arrow.',
       },
     },
     auth: {
@@ -526,7 +535,7 @@ const copy = {
       back: 'Back',
     },
     settings: {
-      docTitle: 'Account — Prospy',
+      docTitle: 'Account. Prospy',
       kicker: 'your account',
       title: 'Settings',
       lead: 'Photo, username, language, appearance. How you show up in shared sessions.',
@@ -549,7 +558,7 @@ const copy = {
       saveFail: 'Could not save.',
       photoUpdated: 'Photo updated.',
       photoFail: 'Could not read that photo.',
-      photoRemoved: 'Photo removed: your username initial is shown.',
+      photoRemoved: 'Photo removed. Your username initial is shown.',
       photoRemoveFail: 'Could not remove the photo.',
       prefs: 'Preferences',
       appearance: 'Appearance',
@@ -564,6 +573,7 @@ const copy = {
       billing: 'Billing',
       planActive: 'active',
       planNone: 'no subscription',
+      planDeveloper: 'developer account',
       memberSince: 'Member since {date}',
       manageBilling: 'Manage billing',
       shortcuts: 'Shortcuts',

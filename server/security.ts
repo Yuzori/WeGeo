@@ -56,24 +56,48 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
 /**
  * Les mutations JSON doivent venir du même site. En développement, le proxy
  * Vite conserve l’origine du front (`localhost:5173`).
+ * Origin ou Referer est exigé : sans les deux, la requête est refusée
+ * (un POST de formulaire cross-site n’envoie souvent pas Origin).
  */
 export function sameOriginMutations(req: Request, res: Response, next: NextFunction): void {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
   if (req.path === '/api/billing/webhook') return next();
 
-  const origin = req.headers.origin;
-  if (!origin) return next();
+  const sourceHost = mutationSourceHost(req);
+  if (!sourceHost) {
+    res.status(403).json({ error: 'Origine manquante.' });
+    return;
+  }
 
   try {
-    const originHost = new URL(origin).host;
     const forwarded = req.headers['x-forwarded-host'];
     const requestHost = (typeof forwarded === 'string' ? forwarded.split(',')[0] : req.headers.host)?.trim();
-    if (requestHost && originHost === requestHost) return next();
-    if (allowedOrigins().has(originHost)) return next();
+    if (requestHost && sourceHost === requestHost) return next();
+    if (allowedOrigins().has(sourceHost)) return next();
   } catch {
     /* origine illisible */
   }
   res.status(403).json({ error: 'Origine non autorisée.' });
+}
+
+function mutationSourceHost(req: Request): string | null {
+  const origin = req.headers.origin;
+  if (typeof origin === 'string' && origin.trim()) {
+    try {
+      return new URL(origin).host;
+    } catch {
+      return null;
+    }
+  }
+  const referer = req.headers.referer;
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      return new URL(referer).host;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 function allowedOrigins(): Set<string> {
@@ -102,4 +126,11 @@ export function publicBaseUrl(req: Request): string {
 
 export function isHttpsRequest(req: Request): boolean {
   return req.secure || req.headers['x-forwarded-proto'] === 'https';
+}
+
+export function assertRuntimeSecrets(): void {
+  if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET?.trim()) {
+    console.error('SESSION_SECRET manquant : refus de démarrer en production.');
+    process.exit(1);
+  }
 }

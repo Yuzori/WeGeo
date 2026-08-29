@@ -188,14 +188,14 @@ export const api = {
   deleteWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
   leaveWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}/leave`, { method: 'POST' }),
   lookupPerson: (query: string) =>
-    request<{ found: boolean; email: string }>('/api/workspaces/lookup', {
+    request<{ found: boolean }>('/api/workspaces/lookup', {
       method: 'POST',
       body: JSON.stringify({ query }),
     }),
   searchPeople: (q: string) =>
     request<{ people: PeopleMatch[] }>(`/api/workspaces/people${qs({ q })}`),
   inviteToWorkspace: (id: number, query: string, locale?: string) =>
-    request<{ ok: true; email: string; workspace: Workspace }>(`/api/workspaces/${id}/invites`, {
+    request<{ ok: true; found: boolean; workspace: Workspace }>(`/api/workspaces/${id}/invites`, {
       method: 'POST',
       body: JSON.stringify({ query, email: query, locale }),
     }),

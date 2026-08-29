@@ -56,7 +56,7 @@ const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
     cta: 'Choisir Starter',
     features: [
       'Relevé Google Maps des commerces sans site',
-      'Pipeline d’appels : trier, appeler, classer',
+      'Pipeline d’appels. Trier, appeler, classer',
       'Export CSV / Excel',
       '1 compte, 1 session personnelle',
       '2 métiers et 50 entreprises par relevé',

@@ -239,7 +239,7 @@ export function CallMode({
               </>
             ) : (
               <p className="rounded-lg border border-dashed border-rule-strong px-5 py-3 text-muted">
-                Aucun numéro sur la fiche — à chercher sur place.
+                Aucun numéro sur la fiche. À chercher sur place.
               </p>
             )}
           </div>
@@ -272,7 +272,7 @@ export function CallMode({
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitNotes}
             rows={3}
-            placeholder="Compte-rendu de l’appel : interlocuteur, objection, date de rappel…"
+            placeholder="Compte-rendu de l’appel. Interlocuteur, objection, date de rappel…"
             className="field mt-6 resize-y text-sm"
           />
         </div>

@@ -120,7 +120,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
       // On affiche la zone retenue : plusieurs communes portent le même nom.
       run.push({
         type: 'progress',
-        message: `Zone analysée : ${geo.displayName} — ${tiles.length} secteur(s)`,
+        message: `Zone analysée. ${geo.displayName}. ${tiles.length} secteur(s)`,
         scanned: 0,
         found: 0,
         taskIndex: 0,
@@ -129,7 +129,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
     } else {
       run.push({
         type: 'progress',
-        message: `Ville introuvable pour le quadrillage — recherche simple sur « ${city} »`,
+        message: `Ville introuvable pour le quadrillage. Recherche simple sur « ${city} »`,
         scanned: 0,
         found: 0,
         taskIndex: 0,
@@ -144,7 +144,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
     tiles.map((tile) => ({
       domain,
       tile,
-      where: tile ? `${city} — ${tile.label}` : city,
+      where: tile ? `${city} · ${tile.label}` : city,
       key: `${domain}@@${tile?.label ?? '-'}`,
     })),
   );
@@ -159,7 +159,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
   if (alreadyDone.size) {
     run.push({
       type: 'progress',
-      message: `Reprise : ${alreadyDone.size} métier(s) déjà parcouru(s), ${tasks.length} restant(s)`,
+      message: `Reprise. ${alreadyDone.size} métier(s) déjà parcouru(s), ${tasks.length} restant(s)`,
       scanned: record.scanned,
       found: record.found,
       taskIndex: alreadyDone.size,
@@ -187,6 +187,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
 
   const attachDirigeant = (lead: Lead, candidate: Candidate) => {
     if (lead.dirigeantStatus === 'found' && lead.dirigeant) return;
+    if (options.lookupDirigeant === false) return;
     enrichments.push(
       lookupDirigeant({ name: candidate.name, address: candidate.address, city: candidate.city })
         .then((hit) => {
@@ -224,7 +225,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
   const worker = async (): Promise<void> => {
     while (cursor < tasks.length && !isCancelled()) {
       const { domain, tile, where, key } = tasks[cursor++];
-      emit(`« ${domain} » à ${where} : ouverture de Google Maps…`);
+      emit(`« ${domain} » à ${where}. Ouverture de Google Maps…`);
 
       let cards: RawCard[] = [];
       try {
@@ -233,12 +234,12 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
           isCancelled,
           // `scanned` reste le total dédupliqué déjà traité : le compteur ne
           // doit jamais reculer, le nombre en cours de chargement va au message.
-          onProgress: (count) => emit(`« ${domain} » à ${where} : ${count} fiches chargées…`),
+          onProgress: (count) => emit(`« ${domain} » à ${where}. ${count} fiches chargées…`),
         });
       } catch (err) {
         done++;
         failures.push(err instanceof Error ? err.message : 'erreur inconnue');
-        emit(`« ${domain} » à ${where} : échec (${failures[failures.length - 1]})`);
+        emit(`« ${domain} » à ${where}. Échec (${failures[failures.length - 1]})`);
         continue;
       }
 
@@ -265,7 +266,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
       //    au fil de l'eau au lieu d'apparaître d'un bloc à la fin du métier.
       if (options.deepCheck && candidates.length && !isCancelled()) {
         let checked = 0;
-        emit(`« ${domain} » à ${where} : vérification de ${candidates.length} fiches…`);
+        emit(`« ${domain} » à ${where}. Vérification de ${candidates.length} fiches…`);
         // L’API SIRENE tourne pendant l’ouverture des fiches Maps.
         for (const candidate of candidates) {
           void lookupDirigeant({ name: candidate.name, address: candidate.address, city: candidate.city });
@@ -279,7 +280,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
             if (details) applyDetails(c, details);
             c.verified = details !== null;
             publish(c);
-            emit(`« ${domain} » à ${where} : ${checked}/${candidates.length} fiches vérifiées`);
+            emit(`« ${domain} » à ${where}. ${checked}/${candidates.length} fiches vérifiées`);
           },
           { isCancelled },
         );
@@ -306,7 +307,7 @@ async function execute(run: Run, record: SearchRecord): Promise<void> {
   const search = db.finishSearch(
     run.id,
     run.cancelled ? 'annule' : allFailed ? 'erreur' : 'termine',
-    allFailed ? failures[0] : failures.length ? `${failures.length} métier(s) illisible(s) : ${failures[0]}` : null,
+    allFailed ? failures[0] : failures.length ? `${failures.length} métier(s) illisible(s). ${failures[0]}` : null,
   );
   run.push({ type: 'done', search: search! });
   scheduleCleanup(run.id);

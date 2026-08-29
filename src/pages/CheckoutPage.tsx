@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { loadStripe } from '@stripe/stripe-js';
 import type { BillingPlan, PlanId } from '../../shared/types';
 import { BrandMark } from '../components/BrandMark';
@@ -77,16 +77,14 @@ export function CheckoutPage() {
 
   return (
     <div className="mx-auto min-h-screen max-w-3xl px-3 py-8 sm:px-4 sm:py-10">
-      <Link to="/" className="mb-8 inline-flex">
-        <BrandMark alt="Prospy" className="h-10 w-10" />
-      </Link>
+      <BrandMark alt="Prospy" className="mb-8 h-10 w-10" />
       <h1 className="text-2xl font-semibold tracking-tight">Abonnement</h1>
       <p className="mt-2 max-w-xl text-sm text-muted">
         Le paiement est traité par Stripe, dans cette page. Prospy ne stocke pas de numéro de carte.
         {user?.email && (
           <>
             {' '}
-            Compte : <span className="text-ink">{user.email}</span>
+            Compte. <span className="text-ink">{user.email}</span>
           </>
         )}
       </p>

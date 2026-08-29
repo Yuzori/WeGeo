@@ -1,5 +1,7 @@
 /** Types partagés entre le serveur (scraping) et l'interface React. */
 
+import type { PlanLimits } from './plans.ts';
+
 /** Étape du pipeline commercial d'un prospect. */
 export type LeadStatus =
   /** Trouvé lors d'une recherche, pas encore trié. */
@@ -97,12 +99,14 @@ export interface SearchOptions {
   excludeHandled: boolean;
   /** Ne garder que les fiches avec un numéro de téléphone. */
   requirePhone: boolean;
-  /** Nombre maximum de fiches inspectées par métier (0 = illimité). */
+  /** Nombre maximum de fiches inspectées par métier (0 = plafond de l’offre). */
   maxPerDomain: number;
   /** Quadrillage géographique : découpe la ville en zones pour dépasser la limite de ~120 résultats. */
   gridMode: boolean;
   /** Nombre de zones par côté du quadrillage (2 = 4 zones, 3 = 9 zones...). */
   gridSize: number;
+  /** Recherche SIRENE du dirigeant — imposé par l’offre, pas par le client. */
+  lookupDirigeant: boolean;
 }
 
 export const DEFAULT_OPTIONS: SearchOptions = {
@@ -114,6 +118,7 @@ export const DEFAULT_OPTIONS: SearchOptions = {
   maxPerDomain: 0,
   gridMode: false,
   gridSize: 2,
+  lookupDirigeant: false,
 };
 
 export interface SearchRequest {
@@ -165,6 +170,10 @@ export interface PublicUser {
   subscriptionStatus: SubscriptionStatus;
   googleLinked: boolean;
   canExportSheets: boolean;
+  /** Accès à l’outil (abonnement actif, essai, ou compte développeur). */
+  hasAccess: boolean;
+  developer: boolean;
+  limits: PlanLimits;
 }
 
 export interface AccountStats {
@@ -178,7 +187,6 @@ export interface AccountStats {
 export interface PeopleMatch {
   id: number;
   username: string;
-  email: string;
   avatarUrl: string | null;
 }
 
@@ -190,7 +198,7 @@ export interface BillingPlan {
   amountLabel: string;
   interval: 'month';
   features: string[];
-  /** Limites de l’offre, affichées sur le site. Pas encore appliquées dans l’outil. */
+  /** Limites de l’offre, affichées sur le site et appliquées côté serveur. */
   locked?: string[];
   highlighted?: boolean;
   cta: string;

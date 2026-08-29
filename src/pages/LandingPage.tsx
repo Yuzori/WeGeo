@@ -40,7 +40,7 @@ const FALLBACK_PLANS: BillingPlan[] = [
     priceConfigured: false,
     features: [
       'Relevé Google Maps des commerces sans site',
-      'Pipeline d’appels : trier, appeler, classer',
+      'Pipeline d’appels. Trier, appeler, classer',
       'Export CSV / Excel',
       '1 compte, 1 session personnelle',
       '2 métiers et 50 entreprises par relevé',
@@ -411,6 +411,36 @@ function MockSearch({ leads }: { leads: Lead[] }) {
   );
 }
 
+function MockPipeline({ leads }: { leads: Lead[] }) {
+  const { m } = useI18n();
+  const cols = [
+    { key: 'new', label: m.mock.toSort, items: leads.slice(3, 5) },
+    { key: 'call', label: m.mock.calling, items: leads.slice(0, 2) },
+    { key: 'done', label: m.mock.signed, items: leads.slice(5, 6) },
+  ];
+  return (
+    <div className="lp-pipe">
+      {cols.map((col) => (
+        <div key={col.key} className="lp-pipe-col">
+          <p className="legend px-0.5">{col.label}</p>
+          {col.items.map((lead) => (
+            <article key={lead.id} className="lp-pipe-card">
+              <p className="truncate text-[13px] font-semibold">{lead.name}</p>
+              <p className="mt-0.5 truncate text-[11px] text-muted">{lead.category}</p>
+              {lead.phone ? (
+                <p className="mt-1.5 flex items-center gap-1 text-[12px] font-semibold text-[color:var(--lp-accent-text)]">
+                  <Phone className="size-3 shrink-0" />
+                  {lead.phone}
+                </p>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ProductMap({ leads, center }: { leads: Lead[]; center: { lat: number; lng: number } }) {
   const [shown, setShown] = useState<Lead[]>([]);
 
@@ -460,7 +490,7 @@ function smoothScrollTo(hash: string) {
 
 export function LandingPage() {
   const { locale, m } = useI18n();
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
   const place = useVisitorPlace();
   const demoLeads = useMemo(() => relocateLeads(DEMO_MAP_LEADS, place), [place]);
   const [plans, setPlans] = useState<BillingPlan[]>([]);
@@ -576,7 +606,7 @@ export function LandingPage() {
                   <ArrowRight className="lp-nav-cta-icon size-3.5 shrink-0" />
                 </Link>
               </>
-            ) : loading ? null : (
+            ) : (
               <>
                 <Link to="/connexion" className="lp-btn lp-btn-ghost lp-nav-login lp-nav-twin uppercase">
                   {m.nav.login}
@@ -631,7 +661,7 @@ export function LandingPage() {
                     {m.nav.app}
                   </Link>
                 </>
-              ) : loading ? null : (
+              ) : (
                 <Link to="/connexion" className="lp-btn lp-btn-ghost uppercase" onClick={() => setMenuOpen(false)}>
                   {m.nav.login}
                 </Link>
@@ -697,8 +727,8 @@ export function LandingPage() {
             <p className="mt-4 max-w-xl text-muted">{m.product.lead}</p>
 
             <div className="lp-product-grid mt-12">
-              <WindowFrame mascot="product" label={m.mock.noSite} className="min-h-[280px]">
-                <MockSearch leads={demoLeads} />
+              <WindowFrame mascot="product" label={m.mock.pipeline} className="min-h-[280px]">
+                <MockPipeline leads={demoLeads} />
               </WindowFrame>
               <WindowFrame label={m.mock.mapHint.replace('{city}', place.city)} className="lp-frame-map">
                 <ProductMap leads={demoLeads} center={place} />
@@ -774,9 +804,10 @@ export function LandingPage() {
                 return (
                     <li
                       key={item.title}
-                      className="lp-reveal lp-interactive flex gap-4 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5"
+                      className="lp-trust-card lp-reveal lp-interactive flex gap-4 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5"
                       {...(index === 0 ? { 'data-mascot': 'trust' } : {})}
                     >
+                    <PhotoSlot name={`trust-${index + 1}`} />
                     <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_16%,transparent)] text-[color:var(--lp-accent-text)]">
                       <Icon className="size-4" />
                     </span>
@@ -788,7 +819,8 @@ export function LandingPage() {
                 );
               })}
             </ul>
-            <aside className="lp-reveal mt-8 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6">
+            <aside className="lp-trust-card lp-reveal mt-8 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6">
+              <PhotoSlot name="trust-google" />
               <h3 className="text-lg">{m.trust.googleTitle}</h3>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{m.trust.googleText}</p>
               <Link to="/confidentialite" className="mt-3 inline-block text-sm font-medium text-lime-deep">
@@ -798,9 +830,8 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="tarifs" className="lp-cv relative border-t border-[var(--lp-line)]">
-          <PhotoSlot name="plans" className="lp-section-photo" />
-          <div className="lp-section-inner lp-page scroll-mt-24">
+        <section id="tarifs" className="lp-cv border-t border-[var(--lp-line)]">
+          <div className="lp-page scroll-mt-24">
             <p className="lp-chip">{m.pricing.chip}</p>
             <h2 className="lp-h2 mt-4">
               <GlyphLine text={m.pricing.h2} />
@@ -818,6 +849,7 @@ export function LandingPage() {
                   )}
                   {...(plan.highlighted ? { 'data-mascot': 'plan' } : {})}
                 >
+                  <PhotoSlot name={`plan-${plan.id}`} />
                   <h3 className="text-2xl">{plan.name}</h3>
                   <p className="mt-1 text-sm text-muted">{plan.tagline}</p>
                   <p className="mt-6 font-[family-name:var(--font-display)] text-4xl tracking-tight">{plan.amountLabel}</p>
@@ -845,7 +877,6 @@ export function LandingPage() {
                 </article>
               ))}
             </div>
-            {!configured && <p className="mt-6 text-sm text-faint">{m.pricing.stripeOff}</p>}
           </div>
         </section>
       </main>
@@ -868,6 +899,7 @@ export function LandingPage() {
               </div>
             </div>
           </section>
+      </div>
 
           <footer className="border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
             <div className="mx-auto flex max-w-6xl flex-col gap-12 px-[clamp(1rem,4vw,1.5rem)] py-14 sm:flex-row sm:justify-between">
@@ -933,10 +965,9 @@ export function LandingPage() {
           </div>
         </div>
         <div className="border-t border-[var(--lp-line)]">
-          <p className="mx-auto max-w-6xl px-4 py-5 font-mono text-[11px] tracking-wide text-faint sm:px-6">{m.footer.copy}</p>
+          <p className="mx-auto max-w-6xl px-4 py-5 pb-8 font-mono text-[11px] tracking-wide text-faint sm:px-6">{m.footer.copy}</p>
         </div>
       </footer>
-      </div>
     </div>
   );
 }

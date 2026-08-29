@@ -44,7 +44,7 @@ export function SheetModal({
     setCopying(true);
     try {
       await navigator.clipboard.writeText(await api.tsv(query));
-      notify('Tableau copié — collez-le dans Google Sheets (Ctrl+V)');
+      notify('Tableau copié. Collez-le dans Google Sheets (Ctrl+V)');
     } catch {
       notify('Copie impossible', 'error');
     } finally {
@@ -69,6 +69,7 @@ export function SheetModal({
     }
   };
 
+  const canSheets = Boolean(user?.limits?.exportSheets);
   const count = data?.rows.length ?? 0;
 
   return (
@@ -76,16 +77,19 @@ export function SheetModal({
       open={open}
       onClose={onClose}
       wide
-      title={`Tableur — ${title}`}
+      title={`Tableur. ${title}`}
       subtitle={loading ? 'Préparation…' : `${count} ligne${count > 1 ? 's' : ''} prête${count > 1 ? 's' : ''} à exporter`}
       footer={
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="legend">
-            {user?.canExportSheets
-              ? 'Google Sheets s’ouvre dans un nouvel onglet'
-              : 'connectez Google une fois, ensuite le tableur part tout seul'}
+            {canSheets
+              ? user?.canExportSheets
+                ? 'Google Sheets s’ouvre dans un nouvel onglet'
+                : 'connectez Google une fois, ensuite le tableur part tout seul'
+              : 'CSV et Excel partent sur votre ordinateur'}
           </p>
           <div className="flex flex-wrap gap-2">
+            {canSheets && (
             <Button
               size="sm"
               variant="primary"
@@ -96,6 +100,7 @@ export function SheetModal({
             >
               {user?.canExportSheets ? 'Ouvrir dans Google Sheets' : 'Connecter Google Sheets'}
             </Button>
+            )}
             <Button
               size="sm"
               icon={<ClipboardCopy className="size-4" />}

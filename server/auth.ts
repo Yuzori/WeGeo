@@ -8,6 +8,7 @@ import { createHash, createHmac, randomBytes, randomInt, scrypt, timingSafeEqual
 import { promisify } from 'node:util';
 import type { NextFunction, Request, Response } from 'express';
 import type { PlanId, PublicUser, SubscriptionStatus } from '../shared/types.ts';
+import { DEV_PLAN_LIMITS, PLAN_LIMITS, type PlanLimits } from '../shared/plans.ts';
 import db, { ensurePersonalWorkspace } from './db.ts';
 import { googleAuthUrl, googleConfigured, exchangeGoogleCode } from './google.ts';
 import { mailConfigured, sendCodeEmail, type MailPurpose } from './mail.ts';
@@ -38,7 +39,41 @@ export interface AuthUser {
 type Row = Record<string, unknown>;
 
 function pepper(): string {
-  return process.env.SESSION_SECRET ?? '';
+  const secret = process.env.SESSION_SECRET?.trim();
+  if (secret) return secret;
+  return process.env.NODE_ENV === 'production' ? '' : 'dev';
+}
+
+export function isDeveloperAccount(email: string): boolean {
+  const raw = process.env.DEV_ACCOUNT_EMAILS ?? '';
+  const allowed = new Set(
+    raw
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return allowed.has(email.trim().toLowerCase());
+}
+
+export function stripeConfigured(): boolean {
+  return Boolean(process.env.STRIPE_SECRET_KEY?.trim());
+}
+
+function subscriptionRow(userId: number): { plan: PlanId | null; status: SubscriptionStatus } {
+  const sub = db
+    .prepare(
+      `SELECT plan, status FROM subscriptions
+       WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .get(userId) as Row | undefined;
+  return {
+    plan: (sub?.plan as PlanId | undefined) ?? null,
+    status: (sub?.status as SubscriptionStatus | undefined) ?? 'none',
+  };
+}
+
+function paidStatus(status: SubscriptionStatus): boolean {
+  return status === 'active' || status === 'trialing';
 }
 
 function hashToken(token: string): string {
@@ -274,21 +309,33 @@ export function requireUser(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
+export function requirePaid(_req: Request, res: Response, next: NextFunction): void {
+  const user = currentUser(res);
+  if (!userHasAccess(user)) {
+    res.status(402).json({ error: 'Un abonnement actif est requis.' });
+    return;
+  }
+  next();
+}
+
 export function currentUser(res: Response): AuthUser {
   return res.locals.user as AuthUser;
 }
 
-export function toPublicUser(user: AuthUser): PublicUser {
-  const sub = db
-    .prepare(
-      `SELECT plan, status FROM subscriptions
-       WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1`,
-    )
-    .get(user.id) as Row | undefined;
+export function planLimitsForUser(user: AuthUser): PlanLimits {
+  if (isDeveloperAccount(user.email)) return DEV_PLAN_LIMITS;
+  if (!stripeConfigured() && process.env.NODE_ENV !== 'production') return DEV_PLAN_LIMITS;
+  const { plan, status } = subscriptionRow(user.id);
+  if (paidStatus(status) && plan && PLAN_LIMITS[plan]) return PLAN_LIMITS[plan];
+  return PLAN_LIMITS.starter;
+}
 
-  const status = (sub?.status as SubscriptionStatus | undefined) ?? 'none';
-  const plan = (sub?.plan as PlanId | undefined) ?? null;
-  const active = status === 'active' || status === 'trialing';
+export function toPublicUser(user: AuthUser): PublicUser {
+  const { plan, status } = subscriptionRow(user.id);
+  const active = paidStatus(status);
+  const developer = isDeveloperAccount(user.email);
+  const hasAccess = userHasAccess(user);
+  const limits = planLimitsForUser(user);
 
   return {
     id: user.id,
@@ -298,17 +345,21 @@ export function toPublicUser(user: AuthUser): PublicUser {
     needsUsername: user.needsUsername,
     hasPassword: user.hasPassword,
     createdAt: user.createdAt,
-    plan: active ? plan : null,
+    plan: active ? plan : developer ? 'agence' : null,
     subscriptionStatus: status,
     googleLinked: Boolean(user.googleId),
-    canExportSheets: Boolean(user.googleRefreshToken),
+    canExportSheets: Boolean(user.googleRefreshToken) && limits.exportSheets,
+    hasAccess,
+    developer,
+    limits,
   };
 }
 
 export function userHasAccess(user: AuthUser): boolean {
-  if (!process.env.STRIPE_SECRET_KEY) return true;
-  const pub = toPublicUser(user);
-  return pub.subscriptionStatus === 'active' || pub.subscriptionStatus === 'trialing';
+  if (isDeveloperAccount(user.email)) return true;
+  if (!stripeConfigured()) return process.env.NODE_ENV !== 'production';
+  const { status } = subscriptionRow(user.id);
+  return paidStatus(status);
 }
 
 export function authMethods(): { google: boolean; mail: boolean } {
@@ -507,7 +558,7 @@ type OauthState = { next: string; link: boolean; t: number };
 
 function signOauthState(payload: OauthState): string {
   const json = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = createHmac('sha256', pepper() || 'dev').update(json).digest('base64url');
+  const sig = createHmac('sha256', pepper()).update(json).digest('base64url');
   return `${json}.${sig}`;
 }
 
@@ -515,7 +566,7 @@ function readOauthState(raw: string | undefined): OauthState | null {
   if (!raw || !raw.includes('.')) return null;
   const [json, sig] = raw.split('.');
   if (!json || !sig) return null;
-  const expected = createHmac('sha256', pepper() || 'dev').update(json).digest('base64url');
+  const expected = createHmac('sha256', pepper()).update(json).digest('base64url');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
