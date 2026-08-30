@@ -1,5 +1,6 @@
 Prospy — briefs d’images (drop les jpg ici, même nom).
-Format : JPG, 1600×1000 min, 4:3. Grain ok. HDR / stock SaaS : non.
+Aussi accepté à la racine de public/ (ex. public/trust-1.jpg).
+Format : JPG, PNG ou WebP, 1600×1000 min, 4:3. Grain ok. HDR / stock SaaS : non.
 Quand le fichier est là, le brief disparaît tout seul.
 
 maps.jpg — Vitrine sans URL

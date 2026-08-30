@@ -81,20 +81,22 @@ export function GeoMap({
 
     const mini = mode === 'mini';
     const embed = mode === 'embed';
+    // La vitrine occupe toute la largeur : sur écran tactile le drag volerait le scroll de la page.
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const map = L.map(el, {
       zoomControl: false,
       attributionControl: false,
-      dragging: !mini,
+      dragging: !mini && !(embed && coarse),
       scrollWheelZoom: !mini && !embed,
-      doubleClickZoom: !mini,
+      doubleClickZoom: !mini && !embed,
       boxZoom: false,
-      keyboard: !mini,
+      keyboard: !mini && !embed,
       zoomSnap: 0.25,
       maxZoom: 19,
     });
     mapRef.current = map;
 
-    if (!mini) L.control.zoom({ position: 'topright' }).addTo(map);
+    if (mode === 'full') L.control.zoom({ position: 'topright' }).addTo(map);
 
     const dark = isDark();
     tilesRef.current = putTiles(map);

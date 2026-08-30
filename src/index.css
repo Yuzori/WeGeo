@@ -2170,7 +2170,11 @@ html.is-lang-out .lp-lang-flip-item.is-on {
 .lp-feature {
   position: relative;
   z-index: auto;
-  overflow: visible;
+  overflow: hidden;
+}
+
+.lp-feature .lp-feature-photo {
+  border-radius: 1rem;
 }
 
 .lp-feature-photo,
@@ -2192,12 +2196,12 @@ html.is-lang-out .lp-lang-flip-item.is-on {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.38;
+  opacity: 0.78;
 }
 
 .dark .lp-feature-photo img,
 .dark .lp-section-photo img {
-  opacity: 0.28;
+  opacity: 0.62;
 }
 
 .lp-feature-photo::after,
@@ -2207,9 +2211,9 @@ html.is-lang-out .lp-lang-flip-item.is-on {
   inset: 0;
   background: linear-gradient(
     180deg,
-    color-mix(in oklab, var(--lp-bg) 42%, transparent) 0%,
-    color-mix(in oklab, var(--lp-bg) 82%, transparent) 55%,
-    var(--lp-bg) 100%
+    color-mix(in oklab, var(--lp-bg) 12%, transparent) 0%,
+    color-mix(in oklab, var(--lp-bg) 38%, transparent) 45%,
+    color-mix(in oklab, var(--lp-bg) 72%, transparent) 100%
   );
 }
 
@@ -2384,10 +2388,17 @@ html.is-lang-out .lp-lang-flip-item.is-on {
 .lp-trio,
 .lp-features-grid,
 .lp-plans,
-.lp-product-grid {
+.lp-product-top {
   display: grid;
-  gap: clamp(0.85rem, 2vw, 1.25rem);
+  gap: clamp(1.6rem, 4vw, 3rem);
   grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  padding-bottom: clamp(2rem, 4vw, 3.25rem);
+}
+
+.lp-product-copy {
+  min-width: 0;
+  max-width: 34rem;
 }
 
 .lp-hero-mocks {
@@ -2426,37 +2437,328 @@ html.is-lang-out .lp-lang-flip-item.is-on {
   }
 }
 
-.lp-product-map {
+.lp-sieve {
   position: relative;
-  min-height: 280px;
-  height: 100%;
-}
-
-.lp-frame-map {
-  display: flex;
-  min-height: 320px;
-  flex-direction: column;
+  z-index: 1;
+  min-width: 0;
   overflow: hidden;
+  padding: clamp(0.9rem, 2vw, 1.3rem);
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--lp-surface) 86%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 28px 64px -38px hsl(var(--shade) / 0.6);
 }
 
-.lp-frame-map .lp-product-map {
-  flex: 1;
-  min-height: 280px;
+.lp-sieve-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.lp-frame-map:hover {
+.lp-sieve-live {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--lp-lime);
+  animation: lp-sieve-pulse 2.1s ease-out infinite;
+}
+
+@keyframes lp-sieve-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--lp-lime) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+.lp-sieve-meters {
+  display: flex;
+  align-items: flex-end;
+  gap: clamp(0.5rem, 1.8vw, 1.15rem);
+  margin-top: 0.9rem;
+}
+
+.lp-sieve-meter {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.lp-sieve-num {
+  font-size: clamp(1.4rem, 3vw, 2.05rem);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.lp-sieve-meter.is-drop .lp-sieve-num {
+  color: color-mix(in oklab, var(--ink) 42%, transparent);
+}
+
+.lp-sieve-meter.is-keep .lp-sieve-num {
+  color: var(--lp-accent-text);
+}
+
+.lp-sieve-cap {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--ink) 52%, transparent);
+}
+
+.lp-sieve-arrow {
+  flex-shrink: 0;
+  margin-bottom: 0.5rem;
+  color: color-mix(in oklab, var(--ink) 28%, transparent);
+}
+
+.lp-sieve-bar {
+  display: flex;
+  height: 5px;
+  margin-top: 0.9rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+}
+
+.lp-sieve-bar > span {
+  transition: width 0.6s var(--ease-out-quint);
+}
+
+.lp-sieve-bar-drop {
+  background: color-mix(in oklab, var(--ink) 20%, transparent);
+}
+
+.lp-sieve-bar-keep {
+  background: var(--lp-lime);
+}
+
+.lp-sieve-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 1rem;
+}
+
+.lp-sieve-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--lp-line);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--lp-bg) 55%, var(--lp-surface));
+  opacity: 0;
+  transform: translate3d(0, 7px, 0);
+  transition:
+    opacity 0.4s var(--ease-out-quint),
+    transform 0.4s var(--ease-out-quint);
+}
+
+.lp-sieve-row.is-on {
+  opacity: 1;
   transform: none;
+}
+
+.lp-sieve-row.is-drop.is-on {
+  opacity: 0.5;
+}
+
+.lp-sieve-row.is-keep {
+  border-color: color-mix(in oklab, var(--lp-lime) 32%, var(--lp-line));
+}
+
+.lp-sieve-row.is-drop .lp-sieve-host {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--ink) 45%, transparent);
+}
+
+.lp-sieve-icon {
+  display: flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lp-line);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--lp-surface) 70%, transparent);
+  color: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+
+.lp-sieve-row.is-keep .lp-sieve-icon {
+  border-color: color-mix(in oklab, var(--lp-lime) 38%, var(--lp-line));
+  background: color-mix(in oklab, var(--lp-lime) 12%, transparent);
+  color: var(--lp-accent-text);
+}
+
+.lp-sieve-signal {
+  min-width: 0;
+  flex: 1;
+}
+
+.lp-sieve-host,
+.lp-sieve-kind {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-sieve-host {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.lp-sieve-kind {
+  margin-top: 1px;
+  font-size: 11px;
+  color: color-mix(in oklab, var(--ink) 52%, transparent);
+}
+
+.lp-sieve-verdict {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 5px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.lp-sieve-row.is-keep .lp-sieve-verdict {
+  color: var(--lp-accent-text);
+  background: color-mix(in oklab, var(--lp-lime) 18%, transparent);
+}
+
+.lp-sieve-row.is-drop .lp-sieve-verdict {
+  color: color-mix(in oklab, var(--ink) 58%, transparent);
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+
+.lp-sieve-note {
+  margin-top: 1rem;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: color-mix(in oklab, var(--ink) 58%, transparent);
+}
+
+.lp-mapband {
+  position: relative;
+  z-index: 1;
+  height: clamp(20rem, 40vw, 27rem);
+  overflow: hidden;
+  border-top: 1px solid var(--lp-line);
+  border-bottom: 1px solid var(--lp-line);
+  /* La carte garde ses tuiles inversées dans les deux thèmes, le voile reste donc sombre. */
+  background: #0b0b0b;
+}
+
+.lp-mapband-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.lp-mapband-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgb(0 0 0 / 0.66) 0%, rgb(0 0 0 / 0.18) 40%, transparent 62%),
+    linear-gradient(180deg, rgb(0 0 0 / 0.38) 0%, transparent 26%, transparent 72%, rgb(0 0 0 / 0.45) 100%);
+}
+
+.lp-mapband-panel {
+  position: absolute;
+  top: 50%;
+  left: clamp(1rem, 5vw, 4rem);
+  z-index: 2;
+  width: min(21rem, calc(100% - 2rem));
+  padding: 1rem 1.15rem 1.15rem;
+  transform: translateY(-50%);
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--lp-surface) 84%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 30px 66px -36px hsl(var(--shade) / 0.72);
+}
+
+.lp-mapband-title {
+  margin-top: 0.5rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 2.2vw, 1.5rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+}
+
+.lp-mapband-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin-top: 0.85rem;
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--ink) 62%, transparent);
+}
+
+.lp-mapband-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.lp-mapband-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+}
+
+.lp-mapband-note {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--lp-line);
+  font-size: 12px;
+  line-height: 1.55;
+  color: color-mix(in oklab, var(--ink) 55%, transparent);
 }
 
 @media (max-width: 759px) {
   .lp-product-extra {
     display: none;
   }
+
+  .lp-mapband {
+    height: clamp(22rem, 78vw, 26rem);
+  }
+
+  .lp-mapband-panel {
+    top: auto;
+    right: 0.75rem;
+    bottom: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+    transform: none;
+  }
+
+  .lp-mapband-note {
+    display: none;
+  }
 }
 
 @media (min-width: 960px) {
-  .lp-product-grid {
-    grid-template-columns: 1fr 1fr;
+  .lp-product-top {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
   }
 }
 
@@ -2623,27 +2925,6 @@ html.is-lang-out .lp-lang-flip-item.is-on {
 
 .dark .lp-mock {
   background: transparent;
-}
-
-.lp-pipe {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-  padding: 0.2rem 0.75rem 0.9rem;
-}
-
-.lp-pipe-col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.lp-pipe-card {
-  padding: 0.55rem 0.6rem;
-  border: 1px solid var(--lp-line);
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--lp-bg) 55%, var(--lp-surface));
 }
 
 .auth-page .auth-title {

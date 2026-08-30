@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
+  BookText,
   Check,
+  CircleSlash,
+  Facebook,
   Globe,
+  Link2Off,
   Lock,
   Map,
   MapPin,
@@ -131,18 +135,29 @@ const RADAR_RINGS = [
   { r: 96, o: 0.04 },
 ];
 
+function photoCandidates(name: string): string[] {
+  const folders = ['', 'landing/'];
+  const exts = ['jpg', 'jpeg', 'png', 'webp'];
+  return folders.flatMap((folder) => exts.map((ext) => `/${folder}${name}.${ext}`));
+}
+
 function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; className?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const tryAt = useRef(0);
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const node = host.current;
     if (!node) return;
+    tryAt.current = 0;
+    setSrc(null);
+    setReady(false);
+    const list = photoCandidates(name);
     const io = new IntersectionObserver(
       ([entry]) => {
         if (!entry?.isIntersecting) return;
-        setSrc(`/landing/${name}.jpg`);
+        setSrc(list[0] ?? null);
         io.disconnect();
       },
       { rootMargin: '140px' },
@@ -163,8 +178,14 @@ function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; cla
           decoding="async"
           onLoad={() => setReady(true)}
           onError={() => {
-            setSrc(null);
-            setReady(false);
+            const list = photoCandidates(name);
+            tryAt.current += 1;
+            const next = list[tryAt.current];
+            if (next) setSrc(next);
+            else {
+              setSrc(null);
+              setReady(false);
+            }
           }}
         />
       ) : null}
@@ -411,37 +432,111 @@ function MockSearch({ leads }: { leads: Lead[] }) {
   );
 }
 
-function MockPipeline({ leads }: { leads: Lead[] }) {
+type SieveKind = 'site' | 'social' | 'directory' | 'parked' | 'none';
+
+const SIEVE_ICONS: Record<SieveKind, typeof Globe> = {
+  site: Globe,
+  social: Facebook,
+  directory: BookText,
+  parked: CircleSlash,
+  none: Link2Off,
+};
+
+const SIEVE_ROWS: { host?: string; kind: SieveKind; keep: boolean }[] = [
+  { host: 'atelier-moreau.fr', kind: 'site', keep: false },
+  { kind: 'none', keep: true },
+  { host: 'facebook.com/chezpaulette', kind: 'social', keep: true },
+  { host: 'garage-du-parc.com', kind: 'site', keep: false },
+  { host: 'pagesjaunes.fr/toiture-martin', kind: 'directory', keep: true },
+  { host: 'lamy-boulangerie.fr', kind: 'parked', keep: true },
+];
+
+const SIEVE_TOTAL = { opened: 128, dropped: 81 };
+
+function WebSieve() {
   const { m } = useI18n();
-  const cols = [
-    { key: 'new', label: m.mock.toSort, items: leads.slice(3, 5) },
-    { key: 'call', label: m.mock.calling, items: leads.slice(0, 2) },
-    { key: 'done', label: m.mock.signed, items: leads.slice(5, 6) },
-  ];
+  const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setStep((prev) => (prev > SIEVE_ROWS.length + 2 ? 0 : prev + 1));
+    }, 880);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const visible = Math.min(step, SIEVE_ROWS.length);
+  const ramp = visible / SIEVE_ROWS.length;
+  const opened = Math.round(SIEVE_TOTAL.opened * ramp);
+  const dropped = Math.round(SIEVE_TOTAL.dropped * ramp);
+  const kept = opened - dropped;
+
   return (
-    <div className="lp-pipe">
-      {cols.map((col) => (
-        <div key={col.key} className="lp-pipe-col">
-          <p className="legend px-0.5">{col.label}</p>
-          {col.items.map((lead) => (
-            <article key={lead.id} className="lp-pipe-card">
-              <p className="truncate text-[13px] font-semibold">{lead.name}</p>
-              <p className="mt-0.5 truncate text-[11px] text-muted">{lead.category}</p>
-              {lead.phone ? (
-                <p className="mt-1.5 flex items-center gap-1 text-[12px] font-semibold text-[color:var(--lp-accent-text)]">
-                  <Phone className="size-3 shrink-0" />
-                  {lead.phone}
-                </p>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      ))}
+    <div className="lp-sieve lp-reveal" data-mascot="product">
+      <div className="lp-sieve-head">
+        <p className="legend">{m.sieve.label}</p>
+        <span className="lp-sieve-live" aria-hidden />
+      </div>
+
+      <div className="lp-sieve-meters">
+        <span className="lp-sieve-meter">
+          <span className="lp-sieve-num tnum">{opened}</span>
+          <span className="lp-sieve-cap">{m.sieve.opened}</span>
+        </span>
+        <ArrowRight className="lp-sieve-arrow size-4" aria-hidden />
+        <span className="lp-sieve-meter is-drop">
+          <span className="lp-sieve-num tnum">{dropped}</span>
+          <span className="lp-sieve-cap">{m.sieve.dropped}</span>
+        </span>
+        <ArrowRight className="lp-sieve-arrow size-4" aria-hidden />
+        <span className="lp-sieve-meter is-keep">
+          <span className="lp-sieve-num tnum">{kept}</span>
+          <span className="lp-sieve-cap">{m.sieve.kept}</span>
+        </span>
+      </div>
+
+      <div className="lp-sieve-bar" aria-hidden>
+        <span className="lp-sieve-bar-drop" style={{ width: `${(dropped / SIEVE_TOTAL.opened) * 100}%` }} />
+        <span className="lp-sieve-bar-keep" style={{ width: `${(kept / SIEVE_TOTAL.opened) * 100}%` }} />
+      </div>
+
+      <ul className="lp-sieve-list">
+        {SIEVE_ROWS.map((row, index) => {
+          const Icon = SIEVE_ICONS[row.kind];
+          const kind = m.sieve.kinds[row.kind];
+          return (
+            <li
+              key={row.host ?? row.kind}
+              className={cx('lp-sieve-row', row.keep ? 'is-keep' : 'is-drop', index < visible && 'is-on')}
+            >
+              <span className="lp-sieve-icon">
+                <Icon className="size-4" />
+              </span>
+              <span className="lp-sieve-signal">
+                <span className="lp-sieve-host">{row.host ?? kind}</span>
+                {row.host ? <span className="lp-sieve-kind">{kind}</span> : null}
+              </span>
+              <span className="lp-sieve-verdict">
+                {row.keep ? <Check className="size-3" /> : <X className="size-3" />}
+                {row.keep ? m.sieve.keep : m.sieve.drop}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="lp-sieve-note">{m.sieve.note}</p>
     </div>
   );
 }
 
-function ProductMap({ leads, center }: { leads: Lead[]; center: { lat: number; lng: number } }) {
+const BAND_TIERS: { tier: keyof typeof TIER_COLORS; key: 'hot' | 'warm' | 'cold' }[] = [
+  { tier: 'excellent', key: 'hot' },
+  { tier: 'bon', key: 'warm' },
+  { tier: 'moyen', key: 'cold' },
+];
+
+function MapBand({ leads, center, city }: { leads: Lead[]; center: { lat: number; lng: number }; city: string }) {
+  const { m } = useI18n();
   const [shown, setShown] = useState<Lead[]>([]);
 
   useEffect(() => {
@@ -475,8 +570,26 @@ function ProductMap({ leads, center }: { leads: Lead[]; center: { lat: number; l
   }, [leads]);
 
   return (
-    <div className="lp-product-map">
-      <GeoMap leads={shown} mode="embed" center={center} className="h-full min-h-[280px]" />
+    <div className="lp-mapband">
+      <div className="lp-mapband-canvas">
+        <GeoMap leads={shown} mode="embed" center={center} className="h-full w-full" />
+      </div>
+      <div className="lp-mapband-veil" aria-hidden />
+      <div className="lp-mapband-panel">
+        <p className="legend">
+          {m.band.label} · {city}
+        </p>
+        <p className="lp-mapband-title">{m.band.title}</p>
+        <ul className="lp-mapband-legend">
+          {BAND_TIERS.map((item) => (
+            <li key={item.key}>
+              <span className="lp-mapband-dot" style={{ background: TIER_COLORS[item.tier].css }} aria-hidden />
+              {m.band[item.key]}
+            </li>
+          ))}
+        </ul>
+        <p className="lp-mapband-note">{m.band.note}</p>
+      </div>
     </div>
   );
 }
@@ -719,22 +832,17 @@ export function LandingPage() {
 
         <section id="produit" className="lp-cv relative">
           <PhotoSlot name="search" className="lp-section-photo" />
-          <div className="lp-section-inner lp-page scroll-mt-24">
-            <p className="lp-chip">{m.product.chip}</p>
-            <h2 className="lp-h2 mt-4 max-w-2xl">
-              <GlyphLine text={m.product.h2} />
-            </h2>
-            <p className="mt-4 max-w-xl text-muted">{m.product.lead}</p>
-
-            <div className="lp-product-grid mt-12">
-              <WindowFrame mascot="product" label={m.mock.pipeline} className="min-h-[280px]">
-                <MockPipeline leads={demoLeads} />
-              </WindowFrame>
-              <WindowFrame label={m.mock.mapHint.replace('{city}', place.city)} className="lp-frame-map">
-                <ProductMap leads={demoLeads} center={place} />
-              </WindowFrame>
+          <div className="lp-section-inner lp-page lp-product-top scroll-mt-24">
+            <div className="lp-product-copy">
+              <p className="lp-chip">{m.product.chip}</p>
+              <h2 className="lp-h2 mt-4">
+                <GlyphLine text={m.product.h2} />
+              </h2>
+              <p className="mt-4 text-muted">{m.product.lead}</p>
             </div>
+            <WebSieve />
           </div>
+          <MapBand leads={demoLeads} center={place} city={place.city} />
         </section>
 
         <section id="fonctionnalites" className="lp-cv border-y border-[var(--lp-line)] bg-[var(--lp-surface)]">
@@ -749,7 +857,7 @@ export function LandingPage() {
                 return (
                   <article
                     key={item.title}
-                    className="lp-feature lp-interactive lp-reveal rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-7"
+                    className="lp-feature lp-interactive lp-reveal overflow-hidden rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-7"
                     {...(index === 0 ? { 'data-mascot': 'feature' } : {})}
                   >
                     <PhotoSlot name={featurePhotos[index]} />
