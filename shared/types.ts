@@ -163,6 +163,8 @@ export interface PublicUser {
   email: string;
   username: string;
   avatarUrl: string | null;
+  /** Dernières photos de profil, pour réactivation rapide (profil courant uniquement). */
+  recentAvatarUrls: string[];
   needsUsername: boolean;
   hasPassword: boolean;
   createdAt: string;
@@ -196,6 +198,12 @@ export interface BillingPlan {
   tagline: string;
   /** Libellé d’affichage uniquement ; le montant facturé est celui de Stripe. */
   amountLabel: string;
+  /** Prix annuel affiché (équivalent ~10 mois). */
+  annualAmountLabel: string;
+  /** Ancien total annuel (12 × mensuel). */
+  annualWasLabel: string;
+  /** Badge promo annuel. */
+  annualBadge: string;
   interval: 'month';
   features: string[];
   /** Limites de l’offre, affichées sur le site et appliquées côté serveur. */
@@ -203,6 +211,7 @@ export interface BillingPlan {
   highlighted?: boolean;
   cta: string;
   priceConfigured: boolean;
+  annualPriceConfigured?: boolean;
 }
 
 export interface BillingPublicConfig {
@@ -230,6 +239,14 @@ export interface Workspace {
   searchCount: number;
   createdAt: string;
   members: WorkspaceMember[];
+  logoUrl: string | null;
+  /** Logo personnalisé actuel (même si l’initiale est affichée). */
+  customLogoUrl: string | null;
+  /** Dernier logo remplacé, pour basculer rapidement. */
+  previousLogoUrl: string | null;
+  logoMode: 'default' | 'custom' | 'previous';
+  /** Couleur ou preset de fond de carte (#hex ou lime|forest|ember|violet). */
+  coverStyle: string | null;
 }
 
 export interface WorkspaceInvite {

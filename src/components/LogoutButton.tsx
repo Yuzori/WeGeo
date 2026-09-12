@@ -26,7 +26,12 @@ export function LogoutButton({ className }: { className?: string }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className={cx('text-[11px] font-medium text-muted hover:text-ink', className)}
+        className={cx(
+          className?.includes('settings-back')
+            ? undefined
+            : 'text-[11px] font-medium text-muted hover:text-ink',
+          className,
+        )}
       >
         {m.chrome.logout}
       </button>

@@ -9,6 +9,18 @@ import { currentUser, findUserByEmail, findUserById, findUserByLogin, normalizeE
 import { avatarUrl } from './avatars.ts';
 import db, { ensurePersonalWorkspace } from './db.ts';
 import { mailConfigured, sendInviteEmail } from './mail.ts';
+import {
+  clearAllWorkspaceLogos,
+  customWorkspaceLogoUrl,
+  hasCustomWorkspaceLogo,
+  hasPreviousWorkspaceLogo,
+  normalizeCoverStyle,
+  normalizeLogoMode,
+  previousWorkspaceLogoUrl,
+  saveWorkspaceLogo,
+  workspaceLogoUrl,
+  type LogoMode,
+} from './workspace-logos.ts';
 
 type Row = Record<string, unknown>;
 const now = () => new Date().toISOString();
@@ -114,12 +126,6 @@ function refreshAutoName(workspaceId: number): void {
        ORDER BY m.joined_at, u.id`,
     )
     .all(workspaceId, owner.id) as Row[];
-  const pending = db
-    .prepare(
-      `SELECT email FROM workspace_invites WHERE workspace_id = ? AND status = 'pending' ORDER BY id`,
-    )
-    .all(workspaceId) as Row[];
-
   const seen = new Set([owner.email]);
   const parts = [owner.username];
   for (const member of members) {
@@ -128,20 +134,21 @@ function refreshAutoName(workspaceId: number): void {
     seen.add(email);
     parts.push(String(member.username || guestLabel(email)));
   }
-  for (const invite of pending) {
-    const email = String(invite.email);
-    if (seen.has(email)) continue;
-    seen.add(email);
-    parts.push(guestLabel(email));
-  }
 
   const name = parts.join(' & ').slice(0, 80);
   if (name.length >= 2) db.prepare('UPDATE workspaces SET name = ? WHERE id = ?').run(name, workspaceId);
 }
 
+function resolveLogoMode(row: Row): LogoMode {
+  const stored = normalizeLogoMode(row.logo_mode);
+  if (stored) return stored;
+  return hasCustomWorkspaceLogo(Number(row.id)) ? 'custom' : 'default';
+}
+
 function toWorkspace(row: Row, userId: number): Workspace {
   const id = Number(row.id);
   const member = membership(id, userId);
+  const logoMode = resolveLogoMode(row);
   const counts = db
     .prepare(
       `SELECT
@@ -160,6 +167,11 @@ function toWorkspace(row: Row, userId: number): Workspace {
     searchCount: Number(counts.searches ?? 0),
     createdAt: String(row.created_at),
     members: membersOf(id),
+    logoUrl: workspaceLogoUrl(id, logoMode),
+    customLogoUrl: customWorkspaceLogoUrl(id),
+    previousLogoUrl: previousWorkspaceLogoUrl(id),
+    logoMode,
+    coverStyle: row.cover_style ? String(row.cover_style) : null,
   };
 }
 
@@ -198,18 +210,55 @@ export function createWorkspace(user: AuthUser, nameRaw: string): Workspace | { 
   return getForUser(id, user)!;
 }
 
-export function renameWorkspace(
+export function updateWorkspace(
   id: number,
   user: AuthUser,
-  nameRaw: string,
+  patch: { name?: string; logo?: string | null; logoMode?: LogoMode; coverStyle?: string | null },
 ): Workspace | { error: string; status: number } {
   const member = membership(id, user.id);
   if (!member) return { error: 'Cette session ne vous est pas ouverte.', status: 403 };
-  if (member.role !== 'owner') return { error: 'Seul le créateur peut renommer la session.', status: 403 };
-  const name = nameRaw.trim().slice(0, 80);
-  if (name.length < 2) return { error: 'Donnez un nom d’au moins 2 lettres.', status: 400 };
-  db.prepare('UPDATE workspaces SET name = ?, auto_named = 0 WHERE id = ?').run(name, id);
+  if (member.role !== 'owner') return { error: 'Seul le créateur peut modifier la session.', status: 403 };
+
+  if (patch.name != null) {
+    const name = patch.name.trim().slice(0, 80);
+    if (name.length < 2) return { error: 'Donnez un nom d’au moins 2 lettres.', status: 400 };
+    db.prepare('UPDATE workspaces SET name = ?, auto_named = 0 WHERE id = ?').run(name, id);
+  }
+
+  if (patch.logo != null) {
+    try {
+      saveWorkspaceLogo(id, patch.logo);
+      db.prepare('UPDATE workspaces SET logo_mode = ? WHERE id = ?').run('custom', id);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Logo invalide.', status: 400 };
+    }
+  } else if (patch.logo === null) {
+    db.prepare('UPDATE workspaces SET logo_mode = ? WHERE id = ?').run('default', id);
+  }
+
+  if (patch.logoMode !== undefined) {
+    const mode = normalizeLogoMode(patch.logoMode);
+    if (!mode) return { error: 'Mode de logo invalide.', status: 400 };
+    if (mode === 'custom' && !hasCustomWorkspaceLogo(id)) {
+      return { error: 'Aucun logo personnalisé enregistré.', status: 400 };
+    }
+    if (mode === 'previous' && !hasPreviousWorkspaceLogo(id)) {
+      return { error: 'Aucun ancien logo disponible.', status: 400 };
+    }
+    db.prepare('UPDATE workspaces SET logo_mode = ? WHERE id = ?').run(mode, id);
+  }
+
+  if (patch.coverStyle !== undefined) {
+    const cover = normalizeCoverStyle(patch.coverStyle);
+    db.prepare('UPDATE workspaces SET cover_style = ? WHERE id = ?').run(cover, id);
+  }
+
   return getForUser(id, user)!;
+}
+
+/** @deprecated alias */
+export function renameWorkspace(id: number, user: AuthUser, nameRaw: string) {
+  return updateWorkspace(id, user, { name: nameRaw });
 }
 
 export function deleteWorkspace(id: number, user: AuthUser): { ok: true } | { error: string; status: number } {
@@ -220,6 +269,7 @@ export function deleteWorkspace(id: number, user: AuthUser): { ok: true } | { er
   db.prepare('DELETE FROM leads WHERE workspace_id = ?').run(id);
   db.prepare('DELETE FROM searches WHERE workspace_id = ?').run(id);
   db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+  clearAllWorkspaceLogos(id);
   return { ok: true };
 }
 
@@ -307,19 +357,12 @@ export async function invite(
     return { error: `Cette session est limitée à ${limits.maxSeats} personnes.`, status: 403 };
   }
 
-  if (current && Number(current.personal) === 1) {
-    db.prepare('UPDATE workspaces SET personal = 0, auto_named = 1 WHERE id = ?').run(workspaceId);
-    ensurePersonalWorkspace(user.id);
-  }
-
   db.prepare(
     `DELETE FROM workspace_invites WHERE workspace_id = ? AND email = ? AND status = 'pending'`,
   ).run(workspaceId, email);
   db.prepare(
     'INSERT INTO workspace_invites (workspace_id, email, from_user_id, status, created_at) VALUES (?,?,?,?,?)',
   ).run(workspaceId, email, user.id, 'pending', now());
-
-  refreshAutoName(workspaceId);
 
   const workspace = getForUser(workspaceId, user)!;
   if (mailConfigured()) {
@@ -351,6 +394,13 @@ export function acceptInvite(inviteId: number, user: AuthUser): Workspace | { er
     db.prepare('DELETE FROM workspace_invites WHERE id = ?').run(inviteId);
     return { error: 'Cette session n’existe plus.', status: 404 };
   }
+
+  const wsRow = db.prepare('SELECT personal, owner_id FROM workspaces WHERE id = ?').get(workspaceId) as Row | undefined;
+  if (wsRow && Number(wsRow.personal) === 1) {
+    db.prepare('UPDATE workspaces SET personal = 0, auto_named = 1 WHERE id = ?').run(workspaceId);
+    ensurePersonalWorkspace(Number(wsRow.owner_id));
+  }
+
   db.prepare('INSERT OR IGNORE INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?,?,?,?)').run(
     workspaceId,
     user.id,
@@ -368,7 +418,6 @@ export function declineInvite(inviteId: number, user: AuthUser): { ok: true } | 
     | undefined;
   if (!row || String(row.email) !== user.email) return { error: 'Invitation introuvable.', status: 404 };
   db.prepare(`UPDATE workspace_invites SET status = 'declined' WHERE id = ?`).run(inviteId);
-  refreshAutoName(Number(row.workspace_id));
   return { ok: true };
 }
 

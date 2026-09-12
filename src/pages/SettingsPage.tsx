@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowLeft, Command, Keyboard, Link2, Shield } from 'lucide-react';
+import { ArrowLeft, BookOpen, Command, Keyboard, Link2, Mail, Scale, Shield } from 'lucide-react';
+import { guideStorageKey } from '../components/MascotGuide';
 import type { AccountStats } from '../../shared/types';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { LangSwitch } from '../components/LangSwitch';
 import { LogoutButton } from '../components/LogoutButton';
 import { UserAvatar } from '../components/UserAvatar';
-import { Button, ThemeToggle, cx } from '../components/ui';
+import { Button, Modal, ThemeToggle, cx } from '../components/ui';
 import { useI18n } from '../i18n';
-import { resizeAvatar } from '../lib/avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import { rememberSettingsFrom, settingsBackPath } from '../lib/nav';
 
 function formatSince(iso: string, locale: string): string {
@@ -37,6 +37,10 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   useEffect(() => {
     if (stateFrom) rememberSettingsFrom(stateFrom);
@@ -85,26 +89,44 @@ export function SettingsPage() {
     }
   };
 
-  const pickPhoto = async (file: File | undefined) => {
-    if (!file) return;
+  const uploadAvatar = async (avatar: string) => {
+    setPhotoBusy(true);
     setError(null);
     try {
-      const avatar = await resizeAvatar(file);
       const result = await api.updateProfile({ avatar });
       setUser(result.user);
       setInfo(m.settings.photoUpdated);
     } catch (err) {
       setError(err instanceof Error ? err.message : m.settings.photoFail);
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const pickRecentPhoto = async (index: number) => {
+    setPhotoBusy(true);
+    setError(null);
+    try {
+      const result = await api.updateProfile({ avatarRecent: index });
+      setUser(result.user);
+      setInfo(m.settings.photoUpdated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : m.settings.photoFail);
+    } finally {
+      setPhotoBusy(false);
     }
   };
 
   const removePhoto = async () => {
+    setPhotoBusy(true);
     try {
       const result = await api.updateProfile({ avatar: null });
       setUser(result.user);
       setInfo(m.settings.photoRemoved);
     } catch (err) {
       setError(err instanceof Error ? err.message : m.settings.photoRemoveFail);
+    } finally {
+      setPhotoBusy(false);
     }
   };
 
@@ -113,6 +135,35 @@ export function SettingsPage() {
     : user.hasAccess
       ? user.plan ?? m.settings.planActive
       : m.settings.planNone;
+
+  const canCancelPlan = !user.developer && user.hasAccess && Boolean(user.plan);
+
+  const openBillingPortal = async () => {
+    try {
+      const { url } = await api.billingPortal();
+      window.location.assign(url);
+    } catch {
+      window.location.assign('/abonnement');
+    }
+  };
+
+  const confirmCancelPlan = async () => {
+    setCancelBusy(true);
+    setError(null);
+    try {
+      const result = await api.cancelBilling();
+      setCancelOpen(false);
+      setInfo(
+        result.endsAt
+          ? m.settings.cancelBillingDone.replace('{date}', formatSince(result.endsAt, locale))
+          : m.settings.cancelBillingDone.replace('{date}', '—'),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : m.settings.cancelBillingFail);
+    } finally {
+      setCancelBusy(false);
+    }
+  };
 
   const googleCopy = user.googleLinked
     ? user.canExportSheets
@@ -129,18 +180,52 @@ export function SettingsPage() {
       ]
     : [];
 
+  const replayGuide = () => {
+    try {
+      localStorage.removeItem(guideStorageKey(user.id));
+    } catch {
+      /* ignore */
+    }
+    setInfo(m.settings.guideReplayDone);
+    setError(null);
+  };
+
+  const shortcutGroups = [
+    {
+      title: m.settings.shortcutsGlobal,
+      rows: [
+        { keys: m.settings.shortcutCtrlJ, label: m.settings.shortcutPalette, mod: true },
+        { keys: m.settings.shortcutEscKey, label: m.settings.shortcutEsc, mod: true },
+      ],
+    },
+    {
+      title: m.settings.shortcutsPalette,
+      rows: [
+        { keys: m.settings.shortcutArrowKeys, label: m.settings.shortcutNav, mod: false },
+        { keys: m.settings.shortcutEnterKey, label: m.settings.shortcutEnter, mod: false },
+      ],
+    },
+    {
+      title: m.settings.shortcutsCalls,
+      rows: [
+        { keys: m.settings.shortcutCallNextKeys, label: m.settings.shortcutCallNext, mod: false },
+        { keys: m.settings.shortcutCallPrevKey, label: m.settings.shortcutCallPrev, mod: false },
+        { keys: m.settings.shortcutCallSignedKey, label: m.settings.shortcutCallSigned, mod: false },
+        { keys: m.settings.shortcutCallLostKey, label: m.settings.shortcutCallLost, mod: false },
+        { keys: m.settings.shortcutCallFavKey, label: m.settings.shortcutCallFav, mod: false },
+      ],
+    },
+  ];
+
   return (
     <div className="app-shell app-settings min-h-svh">
-      <div className="settings-stage mx-auto max-w-3xl px-3 pb-20 pt-3 sm:px-8 sm:pt-6">
+      <div className="settings-stage mx-auto max-w-4xl px-3 pb-20 pt-3 sm:px-8 sm:pt-6">
         <div className="settings-top">
-          <Link to={backTo} className="settings-back settings-morph">
+          <Link to={backTo} className="settings-back">
             <ArrowLeft className="size-3.5" />
             {backLabel}
           </Link>
-          <div className="flex items-center gap-2">
-            <LangSwitch compact />
-            <LogoutButton />
-          </div>
+          <LogoutButton className="settings-back" />
         </div>
 
         <header className="settings-hero">
@@ -158,27 +243,70 @@ export function SettingsPage() {
             <p className="settings-id-name">{user.username}</p>
             <p className="truncate text-[13px] text-faint">{user.email}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <label className="settings-photo-btn settings-morph">
+              <label className={cx('settings-photo-btn settings-morph', photoBusy && 'pointer-events-none opacity-50')}>
                 {m.settings.changePhoto}
                 <input
                   type="file"
                   accept="image/*"
                   className="sr-only"
+                  disabled={photoBusy}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     event.target.value = '';
-                    void pickPhoto(file);
+                    if (file) setCropFile(file);
                   }}
                 />
               </label>
               {user.avatarUrl && (
-                <Button type="button" size="sm" variant="ghost" className="settings-morph" onClick={() => void removePhoto()}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="settings-morph"
+                  disabled={photoBusy}
+                  onClick={() => void removePhoto()}
+                >
                   {m.settings.useInitial}
                 </Button>
               )}
             </div>
+            {user.recentAvatarUrls.length > 0 && (
+              <div className="settings-recent-photos settings-morph">
+                <p className="legend">{m.settings.recentPhotos}</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-faint">{m.settings.recentPhotosHint}</p>
+                <div className="settings-recent-photos-row">
+                  {user.recentAvatarUrls.map((url, index) => (
+                    <button
+                      key={url}
+                      type="button"
+                      className={cx('settings-recent-photo', user.avatarUrl === url && 'is-current')}
+                      disabled={photoBusy}
+                      title={m.settings.recentPhotos}
+                      onClick={() => void pickRecentPhoto(index)}
+                    >
+                      <img src={url} alt="" className="size-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </section>
+
+        <AvatarCropModal
+          file={cropFile}
+          open={cropFile != null}
+          title={m.settings.cropTitle}
+          hint={m.settings.cropHint}
+          zoomLabel={m.settings.cropZoom}
+          cancelLabel={m.settings.cropCancel}
+          applyLabel={m.settings.cropApply}
+          onClose={() => setCropFile(null)}
+          onConfirm={(avatar) => {
+            setCropFile(null);
+            void uploadAvatar(avatar);
+          }}
+        />
 
         {statsItems.length > 0 && (
           <section className="settings-stats">
@@ -193,6 +321,7 @@ export function SettingsPage() {
 
         <div className="settings-grid">
           <form onSubmit={(event) => void save(event)} className="settings-card space-y-4">
+            <p className="legend">{m.settings.identity}</p>
             <label className="block">
               <span className="legend mb-1.5 block">{m.settings.username}</span>
               <input
@@ -241,89 +370,164 @@ export function SettingsPage() {
             </Button>
           </form>
 
-          <div className="space-y-4">
-            <section className="settings-card space-y-5">
-              <p className="legend">{m.settings.prefs}</p>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{m.settings.appearance}</p>
-                  <p className="legend mt-0.5">{m.settings.appearanceHint}</p>
-                </div>
-                <ThemeToggle />
+          <section className="settings-card space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="settings-ico">
+                <Link2 className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">{m.settings.google}</p>
+                <p className="legend mt-0.5">{googleCopy}</p>
+                {!user.googleLinked && google && (
+                  <a href={api.googleUrl('/app/compte', true)} className="settings-photo-btn settings-morph mt-3 inline-flex">
+                    {m.settings.googleLink}
+                  </a>
+                )}
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">{m.settings.language}</p>
-                  <p className="legend mt-0.5">{m.settings.languageHint}</p>
-                </div>
-                <div className="settings-lang" role="group" aria-label={m.nav.lang}>
-                  {(['fr', 'en'] as const).map((code) => (
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="settings-ico">
+                <Shield className="size-4" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold">{m.settings.billing}</p>
+                <p className="legend mt-0.5 capitalize">{planLabel}</p>
+                <p className="legend">
+                  {m.settings.memberSince.replace('{date}', formatSince(stats?.memberSince || user.createdAt, locale))}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                  <button
+                    type="button"
+                    className="settings-morph text-[12px] font-medium text-lime-deep"
+                    onClick={() => void openBillingPortal()}
+                  >
+                    {m.settings.manageBilling}
+                  </button>
+                  {canCancelPlan && (
                     <button
-                      key={code}
                       type="button"
-                      onClick={() => setLocale(code)}
-                      className={cx('settings-lang-btn', locale === code && 'is-on')}
+                      className="settings-morph text-[12px] font-medium text-score-low"
+                      onClick={() => setCancelOpen(true)}
                     >
-                      {code.toUpperCase()}
+                      {m.settings.cancelBilling}
                     </button>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <section className="settings-card space-y-4">
-              <div className="flex items-start gap-3">
-                <span className="settings-ico">
-                  <Link2 className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{m.settings.google}</p>
-                  <p className="legend mt-0.5">{googleCopy}</p>
-                  {!user.googleLinked && google && (
-                    <a href={api.googleUrl('/app/compte', true)} className="settings-photo-btn settings-morph mt-3 inline-flex">
-                      {m.settings.googleLink}
-                    </a>
                   )}
                 </div>
               </div>
-              <div className="flex items-start gap-3">
-                <span className="settings-ico">
-                  <Shield className="size-4" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">{m.settings.billing}</p>
-                  <p className="legend mt-0.5 capitalize">{planLabel}</p>
-                  <p className="legend">
-                    {m.settings.memberSince.replace('{date}', formatSince(stats?.memberSince || user.createdAt, locale))}
-                  </p>
-                  <Link to="/abonnement" className="settings-morph mt-2 inline-block text-[12px] font-medium text-lime-deep">
-                    {m.settings.manageBilling}
+            </div>
+          </section>
+
+          <section className="settings-card space-y-5">
+            <p className="legend">{m.settings.prefs}</p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{m.settings.appearance}</p>
+                <p className="legend mt-0.5">{m.settings.appearanceHint}</p>
+              </div>
+              <ThemeToggle />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{m.settings.language}</p>
+                <p className="legend mt-0.5">{m.settings.languageHint}</p>
+              </div>
+              <div className="settings-lang" role="group" aria-label={m.nav.lang}>
+                {(['fr', 'en'] as const).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setLocale(code)}
+                    className={cx('settings-lang-btn', locale === code && 'is-on')}
+                  >
+                    {code.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">{m.settings.guide}</p>
+                <p className="legend mt-0.5">{m.settings.guideHint}</p>
+              </div>
+              <Button type="button" size="sm" variant="ghost" className="settings-morph shrink-0" onClick={replayGuide}>
+                <BookOpen className="size-3.5" />
+                {m.settings.guideReplay}
+              </Button>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="settings-ico">
+                <Scale className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">{m.settings.legal}</p>
+                <p className="legend mt-0.5">{m.settings.legalHint}</p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] font-medium">
+                  <Link to="/confidentialite" className="text-lime-deep hover:underline">
+                    {m.settings.privacyLink}
+                  </Link>
+                  <Link to="/cgu" className="text-lime-deep hover:underline">
+                    {m.settings.termsLink}
                   </Link>
                 </div>
               </div>
-            </section>
-          </div>
-        </div>
-
-        <section className="settings-card mt-4 space-y-2">
-          <div className="mb-3 flex items-center gap-2">
-            <Keyboard className="size-4 text-lime-deep" />
-            <p className="text-sm font-semibold">{m.settings.shortcuts}</p>
-          </div>
-          {[
-            { keys: m.settings.shortcutCtrlK, label: m.settings.shortcutPalette },
-            { keys: m.settings.shortcutEscKey, label: m.settings.shortcutEsc },
-          ].map((row) => (
-            <div key={row.keys} className="flex items-center justify-between gap-3 text-sm">
-              <span className="text-muted">{row.label}</span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-rule px-2 py-0.5 font-mono text-[11px]">
-                <Command className="size-3" />
-                {row.keys}
-              </span>
             </div>
-          ))}
-        </section>
+            <div className="flex items-start gap-3">
+              <span className="settings-ico">
+                <Mail className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">{m.settings.contact}</p>
+                <p className="legend mt-0.5">{m.settings.contactHint}</p>
+                <a href={`mailto:${m.settings.contactEmail}`} className="settings-morph mt-2 inline-block text-[12px] font-medium text-lime-deep">
+                  {m.settings.contactEmail}
+                </a>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-card settings-card-shortcuts space-y-3">
+            <div className="flex items-center gap-2">
+              <Keyboard className="size-4 text-lime-deep" />
+              <p className="text-sm font-semibold">{m.settings.shortcuts}</p>
+            </div>
+            {shortcutGroups.map((group) => (
+              <div key={group.title} className="settings-shortcut-group">
+                <p className="legend mb-1.5">{group.title}</p>
+                <div className="space-y-1.5">
+                  {group.rows.map((row) => (
+                    <div key={`${group.title}-${row.label}`} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted">{row.label}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-rule px-2 py-0.5 font-mono text-[11px]">
+                        {row.mod && <Command className="size-3" />}
+                        {row.keys}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+        </div>
       </div>
+
+      <Modal
+        open={cancelOpen}
+        onClose={() => !cancelBusy && setCancelOpen(false)}
+        title={m.settings.cancelBillingAsk}
+        subtitle={m.settings.cancelBillingHint}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={cancelBusy} onClick={() => setCancelOpen(false)}>
+              {m.chrome.cancel}
+            </Button>
+            <Button type="button" variant="primary" loading={cancelBusy} onClick={() => void confirmCancelPlan()}>
+              {m.settings.cancelBillingConfirm}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-muted">{m.settings.cancelBillingHint}</p>
+      </Modal>
     </div>
   );
 }

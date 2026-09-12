@@ -26,7 +26,7 @@ function readCachedUser(): PublicUser | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PublicUser;
     if (!parsed || typeof parsed !== 'object' || typeof parsed.id !== 'number') return null;
-    return parsed;
+    return { ...parsed, recentAvatarUrls: parsed.recentAvatarUrls ?? [] };
   } catch {
     return null;
   }

@@ -28,8 +28,14 @@ function parseWho(data: unknown): VisitorPlace | null {
   return { city, lat, lng };
 }
 
-/** En local l’API voit 127.0.0.1 : on interroge alors l’IP vue par le navigateur (donc le VPN). */
+/**
+ * En local l’API voit 127.0.0.1 : on interroge alors l’IP vue par le navigateur
+ * (donc le VPN). Réservé au développement. En production le serveur lit
+ * l’en-tête de proxy et fait l’appel lui-même, ce qui évite d’exposer l’adresse
+ * du visiteur à un service tiers et garde la politique de contenu fermée.
+ */
 async function locateFromBrowser(): Promise<VisitorPlace | null> {
+  if (!import.meta.env.DEV) return null;
   const res = await fetch('https://ipwho.is/?fields=success,city,region,country,latitude,longitude', {
     signal: AbortSignal.timeout(4000),
   });

@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type RefObject } from 'react';
-import { Link, NavLink, Outlet, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Check, History, Inbox, Layers, Menu, PhoneCall, Search, Settings, Star, ThumbsDown, ArrowRight, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PeopleMatch, SearchRecord, Workspace } from '../shared/types';
 import { api, setApiWorkspace } from './api';
 import { RequireAuth, RequirePaid, useAuth, userLimits } from './auth';
-import { MetaContext, useMetaState, useStored } from './hooks';
+import { MetaContext, searchCityKey, searchDomainsKey, searchOptionsKey, useMetaState, useStored } from './hooks';
 import { CommandPalette } from './components/CommandPalette';
 import { InviteInbox } from './components/InviteInbox';
 import { LogoFlight } from './components/LogoFlight';
 import { LogoutButton } from './components/LogoutButton';
-import { GUIDE_STEPS, GUIDE_STORAGE_KEY, MascotGuide, type GuideStep } from './components/MascotGuide';
+import { GUIDE_STEPS, MascotGuide, guideStorageKey, type GuideStep } from './components/MascotGuide';
 import { SettingsLink } from './components/SettingsLink';
 import { UserAvatar } from './components/UserAvatar';
 import { ThemeToggle, ToastProvider, cx } from './components/ui';
@@ -24,9 +24,11 @@ import { PipelinePage } from './pages/PipelinePage';
 import { SearchPage } from './pages/SearchPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { StatsPage } from './pages/StatsPage';
 import { UsernamePage } from './pages/UsernamePage';
 import { sessionPath } from './workspace';
 import { useAppEnter } from './lib/nav';
+import { trackPage } from './lib/analytics';
 
 interface NavItem {
   to: string;
@@ -259,7 +261,7 @@ function Sidebar({
           >
             <Search className="size-3.5" />
             Aller à…
-            <span className="ml-auto font-mono text-[10px] tracking-wider">Ctrl K</span>
+            <span className="ml-auto font-mono text-[10px] tracking-wider">Ctrl J</span>
           </button>
 
           <div className="flex items-center justify-between gap-2">
@@ -292,18 +294,38 @@ function Sidebar({
   );
 }
 
+function AnalyticsTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    trackPage(location.pathname);
+  }, [location.pathname]);
+  return null;
+}
+
 function CheckoutReturn() {
   const [params] = useSearchParams();
-  const { refresh } = useAuth();
+  const navigate = useNavigate();
+  const { refresh, setUser } = useAuth();
 
   useEffect(() => {
     const sessionId = params.get('session_id');
-    if (params.get('checkout') !== 'success' || !sessionId) return;
-    api
-      .confirmCheckout(sessionId)
-      .then(() => refresh())
-      .catch(() => {});
-  }, [params, refresh]);
+    const paymentIntentId = params.get('payment_intent');
+    if (params.get('checkout') !== 'success') return;
+    if (!sessionId && !paymentIntentId) return;
+
+    const confirm = sessionId
+      ? api.confirmCheckout(sessionId)
+      : paymentIntentId
+        ? api.confirmPayment(paymentIntentId)
+        : Promise.resolve(null);
+
+    confirm
+      .then((data) => {
+        if (data?.user) setUser(data.user);
+        navigate('/app', { replace: true });
+      })
+      .catch(() => refresh());
+  }, [navigate, params, refresh, setUser]);
 
   return null;
 }
@@ -342,25 +364,38 @@ function AppShell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const logoRef = useRef<HTMLAnchorElement>(null);
-  const [guideIndex, setGuideIndex] = useState<number | null>(() => {
+  const [guideIndex, setGuideIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const key = guideStorageKey(user.id);
     try {
-      return localStorage.getItem(GUIDE_STORAGE_KEY) ? null : 0;
+      if (localStorage.getItem(key)) {
+        setGuideIndex(null);
+        return;
+      }
+      if (localStorage.getItem('prospy.guide.v3')) {
+        localStorage.setItem(key, '1');
+        setGuideIndex(null);
+        return;
+      }
+      setGuideIndex(0);
     } catch {
-      return 0;
+      setGuideIndex(0);
     }
-  });
+  }, [user?.id]);
 
   const guideTarget: GuideStep | null = guideIndex == null ? null : GUIDE_STEPS[guideIndex];
 
   const finishGuide = useCallback(() => {
     try {
-      localStorage.setItem(GUIDE_STORAGE_KEY, '1');
+      if (user?.id) localStorage.setItem(guideStorageKey(user.id), '1');
     } catch {
       /* ignore quota / private mode */
     }
     setGuideIndex(null);
     setMenuOpen(false);
-  }, []);
+  }, [user?.id]);
 
   const nextGuide = useCallback(() => {
     setGuideIndex((current) => {
@@ -369,7 +404,7 @@ function AppShell() {
       if (upcoming === 'pipeline' || upcoming === 'invite') setMenuOpen(true);
       if (current >= GUIDE_STEPS.length - 1) {
         try {
-          localStorage.setItem(GUIDE_STORAGE_KEY, '1');
+          if (user?.id) localStorage.setItem(guideStorageKey(user.id), '1');
         } catch {
           /* ignore */
         }
@@ -378,7 +413,7 @@ function AppShell() {
       }
       return current + 1;
     });
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!guideTarget) return;
@@ -400,8 +435,16 @@ function AppShell() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]'))
+      ) {
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.code === 'KeyJ') {
         event.preventDefault();
+        event.stopPropagation();
         setPaletteOpen((open) => !open);
       }
       if (event.key === 'Escape' && guideTarget) {
@@ -409,8 +452,8 @@ function AppShell() {
         finishGuide();
       }
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [guideTarget, finishGuide]);
 
   const stats = metaState.meta?.stats;
@@ -451,7 +494,6 @@ function AppShell() {
   return (
     <MetaContext.Provider value={metaState}>
       <div className="app-shell">
-        <CheckoutReturn />
         <Sidebar
           items={items}
           open={menuOpen}
@@ -462,8 +504,16 @@ function AppShell() {
           workspaceId={id}
           onWorkspaceChange={setWorkspace}
         />
-        <LogoFlight sourceRef={logoRef} guideTarget={guideTarget} />
-        <MascotGuide step={guideTarget} onNext={nextGuide} onSkip={finishGuide} />
+        <LogoFlight
+          sourceRef={logoRef}
+          guideTarget={guideTarget}
+          guideActions={
+            guideTarget
+              ? { onSkip: finishGuide, onNext: nextGuide, last: guideTarget === 'invite' }
+              : null
+          }
+        />
+        <MascotGuide step={guideTarget} />
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} workspaceId={id} />
 
         <div className="relative z-[1] lg:pl-[16.5rem]">
@@ -492,9 +542,10 @@ function AppShell() {
 function HistoryOutlet() {
   const navigate = useNavigate();
   const { workspaceId } = useParams();
-  const [, setCity] = useStored('wegeo.city', '');
-  const [, setDomains] = useStored<string[]>('wegeo.domains', []);
-  const [, setOptions] = useStored('wegeo.options', {});
+  const wid = workspaceId ?? '0';
+  const [, setCity] = useStored(searchCityKey(wid), '');
+  const [, setDomains] = useStored<string[]>(searchDomainsKey(wid), []);
+  const [, setOptions] = useStored(searchOptionsKey(wid), {});
 
   const replay = useCallback(
     (search: SearchRecord) => {
@@ -511,13 +562,17 @@ function HistoryOutlet() {
 
 function AppRoutes() {
   return (
-    <Routes>
+    <>
+      <AnalyticsTracker />
+      <CheckoutReturn />
+      <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/confidentialite" element={<LegalPage kind="privacy" />} />
       <Route path="/cgu" element={<LegalPage kind="terms" />} />
       <Route path="/connexion" element={<AuthPage mode="login" />} />
       <Route path="/inscription" element={<AuthPage mode="register" />} />
       <Route path="/mot-de-passe-oublie" element={<AuthPage mode="forgot" />} />
+      <Route path="/prospy/stats" element={<StatsPage />} />
       <Route
         path="/abonnement"
         element={
@@ -621,6 +676,7 @@ function AppRoutes() {
         <Route path="historique" element={<HistoryOutlet />} />
       </Route>
     </Routes>
+    </>
   );
 }
 

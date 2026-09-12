@@ -21,7 +21,8 @@ const run = async () => {
   const browser = await chromium.launch();
   const errors: string[] = [];
 
-  for (const theme of ['clair', 'sombre'] as const) {
+  // Les valeurs stockées sont `jour` et `nuit`, cf. applyStoredTheme.
+  for (const theme of ['jour', 'nuit'] as const) {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });
     await ctx.addInitScript(`localStorage.setItem('wegeo.theme', '${theme}')`);
     const page = await ctx.newPage();

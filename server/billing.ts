@@ -9,6 +9,9 @@ import type { Request } from 'express';
 import type { BillingPlan, BillingPublicConfig, PlanId, SubscriptionStatus } from '../shared/types.ts';
 import db from './db.ts';
 import type { AuthUser } from './auth.ts';
+import { findUserById } from './auth.ts';
+import { recordEvent } from './analytics.ts';
+import { sendSubscriptionEmail } from './mail.ts';
 import { publicBaseUrl } from './security.ts';
 
 const PLAN_IDS: PlanId[] = ['starter', 'pro', 'agence'];
@@ -24,30 +27,55 @@ function stripe(): Stripe | null {
   return stripeClient;
 }
 
-function envPrice(plan: PlanId): string | undefined {
+function envPrice(plan: PlanId, interval: 'month' | 'year' = 'month'): string | undefined {
+  const annualSuffix = interval === 'year' ? '_ANNUAL' : '';
   const map: Record<PlanId, string | undefined> = {
-    starter: process.env.STRIPE_PRICE_STARTER,
-    pro: process.env.STRIPE_PRICE_PRO,
-    agence: process.env.STRIPE_PRICE_AGENCE,
+    starter: process.env[`STRIPE_PRICE_STARTER${annualSuffix}`],
+    pro: process.env[`STRIPE_PRICE_PRO${annualSuffix}`],
+    agence: process.env[`STRIPE_PRICE_AGENCE${annualSuffix}`],
   };
   const value = map[plan]?.trim();
   return value || undefined;
+}
+
+function euros(cents: number): string {
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(
+    cents / 100,
+  );
 }
 
 function amountLabel(plan: PlanId): string {
   const centsRaw = process.env[`PLAN_${plan.toUpperCase()}_CENTS`];
   const parsed = centsRaw ? Number(centsRaw) : NaN;
   const cents = Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CENTS[plan];
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+  return euros(cents);
+}
+
+function annualLabels(plan: PlanId): Pick<BillingPlan, 'annualAmountLabel' | 'annualWasLabel' | 'annualBadge'> {
+  const monthly = DEFAULT_CENTS[plan];
+  const annual = ANNUAL_CENTS[plan];
+  return {
+    annualAmountLabel: euros(annual),
+    annualWasLabel: euros(monthly * 12),
+    annualBadge: '-17 % · 2 mois offerts',
+  };
 }
 
 const DEFAULT_CENTS: Record<PlanId, number> = {
-  starter: 1900,
-  pro: 4900,
-  agence: 8900,
+  starter: 2900,
+  pro: 5900,
+  agence: 11900,
 };
 
-const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
+const ANNUAL_CENTS: Record<PlanId, number> = {
+  starter: 29000,
+  pro: 59000,
+  agence: 111900,
+};
+
+const CATALOG: Array<
+  Omit<BillingPlan, 'amountLabel' | 'annualAmountLabel' | 'annualWasLabel' | 'annualBadge' | 'priceConfigured'>
+> = [
   {
     id: 'starter',
     name: 'Starter',
@@ -94,7 +122,7 @@ const CATALOG: Array<Omit<BillingPlan, 'amountLabel' | 'priceConfigured'>> = [
   {
     id: 'agence',
     name: 'Agence',
-    tagline: 'Pour enchaîner les villes et les métiers.',
+    tagline: 'Pour les équipes qui enchaînent villes et métiers.',
     interval: 'month',
     cta: 'Choisir Agence',
     features: [
@@ -114,7 +142,9 @@ export function publicBillingConfig(): BillingPublicConfig {
   const plans: BillingPlan[] = CATALOG.map((plan) => ({
     ...plan,
     amountLabel: amountLabel(plan.id),
-    priceConfigured: Boolean(envPrice(plan.id)),
+    ...annualLabels(plan.id),
+    priceConfigured: Boolean(envPrice(plan.id, 'month')),
+    annualPriceConfigured: Boolean(envPrice(plan.id, 'year')),
   }));
 
   return {
@@ -144,9 +174,13 @@ function mapStripeStatus(status: string | null | undefined): SubscriptionStatus 
 function planFromPrice(priceId: string | undefined): PlanId | null {
   if (!priceId) return null;
   for (const id of PLAN_IDS) {
-    if (envPrice(id) === priceId) return id;
+    if (envPrice(id, 'month') === priceId || envPrice(id, 'year') === priceId) return id;
   }
   return null;
+}
+
+function subscriptionPaid(status: SubscriptionStatus): boolean {
+  return status === 'active' || status === 'trialing';
 }
 
 export function upsertSubscription(params: {
@@ -155,22 +189,61 @@ export function upsertSubscription(params: {
   subscriptionId: string | null;
   plan: PlanId | null;
   status: SubscriptionStatus;
-}): void {
+}): boolean {
   const ts = new Date().toISOString();
-  const existing = db.prepare('SELECT id FROM subscriptions WHERE user_id = ?').get(params.userId) as Row | undefined;
+  const existing = db.prepare('SELECT id, status FROM subscriptions WHERE user_id = ?').get(params.userId) as
+    | Row
+    | undefined;
+  const previousStatus =
+    typeof existing?.status === 'string' ? (existing.status as SubscriptionStatus) : null;
+  const activated = subscriptionPaid(params.status) && !subscriptionPaid(previousStatus ?? 'incomplete');
+
   if (existing) {
     db.prepare(
       `UPDATE subscriptions
        SET stripe_customer_id = ?, stripe_subscription_id = ?, plan = ?, status = ?, updated_at = ?
        WHERE user_id = ?`,
     ).run(params.customerId, params.subscriptionId, params.plan, params.status, ts, params.userId);
-    return;
+    return activated;
   }
   db.prepare(
     `INSERT INTO subscriptions
       (user_id, stripe_customer_id, stripe_subscription_id, plan, status, created_at, updated_at)
      VALUES (?,?,?,?,?,?,?)`,
   ).run(params.userId, params.customerId, params.subscriptionId, params.plan, params.status, ts, ts);
+  return activated;
+}
+
+async function notifySubscriptionActivated(userId: number, plan: PlanId | null): Promise<void> {
+  const user = findUserById(userId);
+  if (!user) return;
+  const catalog = CATALOG.find((entry) => entry.id === plan);
+  try {
+    await sendSubscriptionEmail({
+      to: user.email,
+      planName: catalog?.name ?? plan ?? 'Prospy',
+      planId: plan,
+    });
+    recordEvent({
+      visitorId: `user:${userId}`,
+      event: 'funnel:paid',
+      path: '/abonnement',
+      meta: { plan: plan ?? 'unknown' },
+    });
+  } catch (err) {
+    console.error('[Prospy] e-mail abonnement:', err instanceof Error ? err.message : err);
+  }
+}
+
+function applySubscription(params: {
+  userId: number;
+  customerId: string;
+  subscriptionId: string | null;
+  plan: PlanId | null;
+  status: SubscriptionStatus;
+}): void {
+  const activated = upsertSubscription(params);
+  if (activated) void notifySubscriptionActivated(params.userId, params.plan);
 }
 
 function userIdFromStripe(obj: { client_reference_id?: string | null; metadata?: Stripe.Metadata | null }): number | null {
@@ -179,7 +252,62 @@ function userIdFromStripe(obj: { client_reference_id?: string | null; metadata?:
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-export async function createEmbeddedCheckout(user: AuthUser, planId: string, req: Request): Promise<{ clientSecret: string } | { error: string; status: number }> {
+const CHECKOUT_PAYMENT_METHODS = ['card', 'link', 'paypal'] as const;
+
+function paymentIntentIdFromClientSecret(clientSecret: string): string | null {
+  const id = clientSecret.split('_secret_')[0];
+  return id.startsWith('pi_') ? id : null;
+}
+
+async function syncPaymentIntentMethods(client: Stripe, clientSecret: string): Promise<void> {
+  const piId = paymentIntentIdFromClientSecret(clientSecret);
+  if (!piId) return;
+  try {
+    await client.paymentIntents.update(piId, {
+      payment_method_types: [...CHECKOUT_PAYMENT_METHODS],
+    });
+  } catch {
+    /* Stripe a déjà verrouillé les moyens de paiement sur la facture */
+  }
+}
+
+function clientSecretFromSubscription(subscription: Stripe.Subscription): string | null {
+  const invoice = subscription.latest_invoice;
+  if (!invoice || typeof invoice === 'string') return null;
+
+  type InvoicePayment = Stripe.Invoice & {
+    confirmation_secret?: { client_secret?: string | null; type?: string } | null;
+    payment_intent?: Stripe.PaymentIntent | string | null;
+  };
+
+  const expanded = invoice as InvoicePayment;
+  if (expanded.confirmation_secret?.client_secret) {
+    return expanded.confirmation_secret.client_secret;
+  }
+
+  const paymentIntent = expanded.payment_intent;
+  if (paymentIntent && typeof paymentIntent !== 'string' && paymentIntent.client_secret) {
+    return paymentIntent.client_secret;
+  }
+
+  return null;
+}
+
+export async function createSubscriptionPayment(
+  user: AuthUser,
+  planId: string,
+  interval: 'month' | 'year',
+  req: Request,
+): Promise<
+  | {
+      clientSecret: string;
+      returnUrl: string;
+      planName: string;
+      amountLabel: string;
+      interval: 'month' | 'year';
+    }
+  | { error: string; status: number }
+> {
   const client = stripe();
   const publishable = process.env.STRIPE_PUBLISHABLE_KEY?.trim();
   if (!client || !publishable) {
@@ -189,34 +317,81 @@ export async function createEmbeddedCheckout(user: AuthUser, planId: string, req
     return { error: 'Offre inconnue.', status: 400 };
   }
   const plan = planId;
-  const price = envPrice(plan);
+  const price = envPrice(plan, interval);
   if (!price) {
     return { error: 'Cette offre n’a pas de tarif Stripe configuré.', status: 503 };
   }
 
+  const customerId = await ensureStripeCustomer(client, user);
+
+  const stale = await client.subscriptions.list({ customer: customerId, status: 'incomplete', limit: 20 });
+  for (const sub of stale.data) {
+    await client.subscriptions.cancel(sub.id);
+  }
+
+  const catalog = CATALOG.find((entry) => entry.id === plan);
+  const subscription = await client.subscriptions.create({
+    customer: customerId,
+    items: [{ price }],
+    payment_behavior: 'default_incomplete',
+    payment_settings: {
+      payment_method_types: [...CHECKOUT_PAYMENT_METHODS],
+      save_default_payment_method: 'on_subscription',
+    },
+    expand: ['latest_invoice.confirmation_secret', 'latest_invoice.payment_intent'],
+    metadata: { userId: String(user.id), plan, interval },
+  });
+
+  const clientSecret = clientSecretFromSubscription(subscription);
+
+  if (!clientSecret) {
+    return { error: 'Stripe n’a pas renvoyé de session de paiement.', status: 502 };
+  }
+
+  await syncPaymentIntentMethods(client, clientSecret);
+
+  return {
+    clientSecret,
+    returnUrl: `${publicBaseUrl(req)}/abonnement?checkout=success`,
+    planName: catalog?.name ?? plan,
+    amountLabel: interval === 'year' ? annualLabels(plan).annualAmountLabel : amountLabel(plan),
+    interval,
+  };
+}
+
+/** @deprecated Embedded Checkout — conservé pour compatibilité interne. */
+export async function createEmbeddedCheckout(
+  user: AuthUser,
+  planId: string,
+  interval: 'month' | 'year',
+  req: Request,
+): Promise<{ clientSecret: string } | { error: string; status: number }> {
+  const result = await createSubscriptionPayment(user, planId, interval, req);
+  if ('error' in result) return result;
+  return { clientSecret: result.clientSecret };
+}
+
+async function ensureStripeCustomer(client: Stripe, user: AuthUser): Promise<string> {
   const existing = db
     .prepare('SELECT stripe_customer_id FROM subscriptions WHERE user_id = ?')
     .get(user.id) as Row | undefined;
+  const stored = typeof existing?.stripe_customer_id === 'string' ? existing.stripe_customer_id : null;
+  if (stored) return stored;
 
-  const session = await client.checkout.sessions.create({
-    ui_mode: 'embedded',
-    mode: 'subscription',
-    customer: typeof existing?.stripe_customer_id === 'string' ? existing.stripe_customer_id : undefined,
-    customer_email: existing?.stripe_customer_id ? undefined : user.email,
-    client_reference_id: String(user.id),
-    line_items: [{ price, quantity: 1 }],
-    allow_promotion_codes: true,
-    return_url: `${publicBaseUrl(req)}/app?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    metadata: { userId: String(user.id), plan },
-    subscription_data: {
-      metadata: { userId: String(user.id), plan },
-    },
+  const customer = await client.customers.create({
+    email: user.email,
+    metadata: { userId: String(user.id) },
   });
 
-  if (!session.client_secret) {
-    return { error: 'Stripe n’a pas renvoyé de session embarquée.', status: 502 };
-  }
-  return { clientSecret: session.client_secret };
+  upsertSubscription({
+    userId: user.id,
+    customerId: customer.id,
+    subscriptionId: null,
+    plan: null,
+    status: 'incomplete',
+  });
+
+  return customer.id;
 }
 
 export async function createPortal(user: AuthUser, req: Request): Promise<{ url: string } | { error: string; status: number }> {
@@ -238,6 +413,108 @@ export async function createPortal(user: AuthUser, req: Request): Promise<{ url:
   return { url: portal.url };
 }
 
+export async function cancelSubscription(
+  user: AuthUser,
+): Promise<{ ok: true; endsAt: string | null } | { error: string; status: number }> {
+  const client = stripe();
+  if (!client) return { error: 'Les paiements ne sont pas encore configurés.', status: 503 };
+
+  const row = db
+    .prepare('SELECT stripe_subscription_id, status FROM subscriptions WHERE user_id = ?')
+    .get(user.id) as Row | undefined;
+  const subId = row?.stripe_subscription_id;
+  if (typeof subId !== 'string' || !subId) {
+    return { error: 'Aucun abonnement Stripe à résilier sur ce compte.', status: 404 };
+  }
+
+  const sub = await client.subscriptions.update(subId, { cancel_at_period_end: true });
+  const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+  if (!customerId) {
+    return { error: 'Client Stripe introuvable.', status: 404 };
+  }
+  const period = sub as unknown as { cancel_at?: number | null; current_period_end?: number };
+  const unix = typeof period.cancel_at === 'number' ? period.cancel_at : typeof period.current_period_end === 'number' ? period.current_period_end : null;
+  upsertSubscription({
+    userId: user.id,
+    customerId,
+    subscriptionId: sub.id,
+    plan: planFromPrice(sub.items.data[0]?.price.id) ?? (sub.metadata?.plan as PlanId | undefined) ?? null,
+    status: mapStripeStatus(sub.status),
+  });
+  return { ok: true, endsAt: unix ? new Date(unix * 1000).toISOString() : null };
+}
+
+export async function confirmPaymentIntent(
+  user: AuthUser,
+  paymentIntentId: string,
+): Promise<{ ok: true } | { error: string; status: number }> {
+  const client = stripe();
+  if (!client || !paymentIntentId.startsWith('pi_')) {
+    return { error: 'Paiement introuvable.', status: 400 };
+  }
+
+  const pi = await client.paymentIntents.retrieve(paymentIntentId);
+  if (pi.status !== 'succeeded' && pi.status !== 'processing') {
+    return { error: 'Le paiement n’est pas encore confirmé.', status: 402 };
+  }
+
+  const customerId = typeof pi.customer === 'string' ? pi.customer : pi.customer?.id;
+  if (!customerId) return { error: 'Client Stripe introuvable.', status: 400 };
+
+  const row = db
+    .prepare('SELECT stripe_customer_id FROM subscriptions WHERE user_id = ?')
+    .get(user.id) as Row | undefined;
+  if (row?.stripe_customer_id && row.stripe_customer_id !== customerId) {
+    return { error: 'Ce paiement ne correspond pas à votre compte.', status: 403 };
+  }
+
+  let subscriptionId: string | null = null;
+  let plan: PlanId | null = null;
+
+  const invoiceRef = (pi as Stripe.PaymentIntent & { invoice?: string | Stripe.Invoice | null }).invoice;
+  const invoiceId = typeof invoiceRef === 'string' ? invoiceRef : invoiceRef?.id;
+  if (invoiceId) {
+    const invoice = await client.invoices.retrieve(invoiceId, { expand: ['subscription'] });
+    const subRef = (invoice as Stripe.Invoice & { subscription?: string | Stripe.Subscription | null }).subscription;
+    subscriptionId = typeof subRef === 'string' ? subRef : subRef?.id ?? null;
+  }
+
+  if (!subscriptionId) {
+    const subs = await client.subscriptions.list({ customer: customerId, status: 'all', limit: 12 });
+    const owned = subs.data.find((sub) => userIdFromStripe(sub) === user.id);
+    subscriptionId = owned?.id ?? null;
+  }
+
+  if (!subscriptionId) return { error: 'Abonnement introuvable pour ce paiement.', status: 404 };
+
+  const sub = await client.subscriptions.retrieve(subscriptionId);
+  if (userIdFromStripe(sub) !== user.id) {
+    return { error: 'Ce paiement ne correspond pas à votre compte.', status: 403 };
+  }
+
+  const priceId = sub.items.data[0]?.price.id;
+  plan = planFromPrice(priceId) ?? (sub.metadata?.plan as PlanId | undefined) ?? null;
+
+  let status = mapStripeStatus(sub.status);
+  if (!subscriptionPaid(status)) {
+    const fresh = await client.subscriptions.retrieve(subscriptionId);
+    status = mapStripeStatus(fresh.status);
+  }
+  if (!subscriptionPaid(status) && pi.status === 'succeeded') {
+    status = 'active';
+  }
+
+  applySubscription({
+    userId: user.id,
+    customerId,
+    subscriptionId: sub.id,
+    plan,
+    status,
+  });
+
+  return { ok: true };
+}
+
 export async function confirmCheckoutSession(user: AuthUser, sessionId: string): Promise<void> {
   const client = stripe();
   if (!client || !sessionId.startsWith('cs_')) return;
@@ -254,7 +531,7 @@ export async function confirmCheckoutSession(user: AuthUser, sessionId: string):
   const stripeSub = typeof sub === 'string' ? await client.subscriptions.retrieve(sub) : sub;
   const priceId = stripeSub && !('deleted' in stripeSub) ? stripeSub.items.data[0]?.price.id : undefined;
 
-  upsertSubscription({
+  applySubscription({
     userId: user.id,
     customerId,
     subscriptionId: stripeSub && !('deleted' in stripeSub) ? stripeSub.id : null,
@@ -292,7 +569,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string | undefin
         plan = planFromPrice(sub.items.data[0]?.price.id) ?? plan;
         status = mapStripeStatus(sub.status);
       }
-      upsertSubscription({ userId, customerId, subscriptionId, plan, status });
+      applySubscription({ userId, customerId, subscriptionId, plan, status });
       break;
     }
     case 'customer.subscription.updated':
@@ -301,7 +578,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string | undefin
       const userId = userIdFromStripe(sub);
       const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
       if (!userId) break;
-      upsertSubscription({
+      applySubscription({
         userId,
         customerId,
         subscriptionId: sub.id,
@@ -320,7 +597,7 @@ export async function handleWebhook(rawBody: Buffer, signature: string | undefin
       const userId = userIdFromStripe(sub);
       const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
       if (!userId) break;
-      upsertSubscription({
+      applySubscription({
         userId,
         customerId,
         subscriptionId: sub.id,

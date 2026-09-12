@@ -6,8 +6,10 @@ import { AuthProvider } from './auth';
 import { applyStoredTheme } from './components/ui';
 import { LocaleProvider } from './i18n';
 import './index.css';
+import './lp-atmo.css';
 
 applyStoredTheme();
+document.documentElement.classList.add('prospy-site');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

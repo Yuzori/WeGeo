@@ -70,6 +70,77 @@ export interface VisitorPlace {
   city: string;
   lat: number;
   lng: number;
+  region?: string;
+  country?: string;
+}
+
+export interface SiteStats {
+  generatedAt: string;
+  dbPath: string;
+  visits: {
+    pageviews: number;
+    pageviewsToday: number;
+    pageviewsWeek: number;
+    uniqueVisitors: number;
+    uniqueToday: number;
+    liveNow: number;
+  };
+  topPages: { path: string; views: number }[];
+  funnel: { step: string; label: string; visitors: number; dropFromPrevious: number | null }[];
+  users: {
+    total: number;
+    today: number;
+    week: number;
+    verified: number;
+  };
+  accounts: StatsAccount[];
+  subscriptions: {
+    active: number;
+    byPlan: { plan: string; count: number }[];
+    byStatus: { status: string; count: number }[];
+    newWeek: number;
+  };
+  product: {
+    searches: number;
+    searchesWeek: number;
+    leads: number;
+    workspaces: number;
+  };
+  globe: {
+    live: GlobePoint[];
+    all: GlobePoint[];
+  };
+  recent: { at: string; event: string; path: string | null; visitorId: string; geo: string | null }[];
+}
+
+export interface GlobePoint {
+  lat: number;
+  lng: number;
+  label: string;
+  at: string;
+  live: boolean;
+}
+
+export interface StatsAccount {
+  id: number;
+  email: string;
+  username: string;
+  createdAt: string;
+  emailVerified: boolean;
+  googleLinked: boolean;
+  needsUsername: boolean;
+  avatarUrl: string | null;
+  plan: string | null;
+  subscriptionStatus: string;
+  geo: {
+    city: string | null;
+    region: string | null;
+    country: string | null;
+    label: string | null;
+    lat: number | null;
+    lng: number | null;
+  };
+  lastSeenAt: string | null;
 }
 
 export const api = {
@@ -143,8 +214,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, purpose, locale }),
     }),
-  forgot: (email: string, locale?: string) =>
-    request<{ ok: true }>('/api/auth/forgot', { method: 'POST', body: JSON.stringify({ email, locale }) }),
+  forgot: (identifier: string, locale?: string) =>
+    request<{ ok: true; email?: string }>('/api/auth/forgot', {
+      method: 'POST',
+      body: JSON.stringify({ identifier, locale }),
+    }),
   resetPassword: (email: string, code: string, password: string) =>
     request<{ user: PublicUser }>('/api/auth/reset', {
       method: 'POST',
@@ -158,7 +232,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ username }),
     }),
-  updateProfile: (body: { username?: string; password?: string; currentPassword?: string; avatar?: string | null }) =>
+  updateProfile: (body: {
+    username?: string;
+    password?: string;
+    currentPassword?: string;
+    avatar?: string | null;
+    avatarRecent?: number;
+  }) =>
     request<{ user: PublicUser }>('/api/auth/profile', {
       method: 'PATCH',
       body: JSON.stringify(body),
@@ -169,14 +249,37 @@ export const api = {
     request<{ url: string; id: string }>(`/api/export/sheets${qs(query)}`, { method: 'POST' }),
 
   billingConfig: () => request<BillingPublicConfig>('/api/billing/config'),
-  checkout: (plan: string) =>
-    request<{ clientSecret: string }>('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan }) }),
+  checkout: (plan: string, interval: 'month' | 'year' = 'month') =>
+    request<{
+      clientSecret: string;
+      returnUrl: string;
+      planName: string;
+      amountLabel: string;
+      interval: 'month' | 'year';
+    }>('/api/billing/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ plan, interval }),
+    }),
   billingPortal: () => request<{ url: string }>('/api/billing/portal', { method: 'POST' }),
+  cancelBilling: () => request<{ ok: true; endsAt: string | null }>('/api/billing/cancel', { method: 'POST' }),
   confirmCheckout: (sessionId: string) =>
     request<{ user: PublicUser }>('/api/billing/confirm', {
       method: 'POST',
       body: JSON.stringify({ sessionId }),
     }),
+  confirmPayment: (paymentIntentId: string) =>
+    request<{ user: PublicUser }>('/api/billing/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ paymentIntentId }),
+    }),
+
+  statsLogin: (password: string) =>
+    request<{ ok: true }>('/api/prospy/stats/login', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  siteStats: () => request<SiteStats>('/api/prospy/stats'),
 
   workspaces: () => request<{ workspaces: Workspace[]; invites: WorkspaceInvite[] }>('/api/workspaces'),
   workspaceInvites: () => request<{ invites: WorkspaceInvite[] }>('/api/workspaces/invites'),
@@ -185,6 +288,19 @@ export const api = {
     request<{ workspace: Workspace }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
   renameWorkspace: (id: number, name: string) =>
     request<{ workspace: Workspace }>(`/api/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  updateWorkspace: (
+    id: number,
+    patch: {
+      name?: string;
+      logo?: string | null;
+      logoMode?: 'default' | 'custom' | 'previous';
+      coverStyle?: string | null;
+    },
+  ) =>
+    request<{ workspace: Workspace }>(`/api/workspaces/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   deleteWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
   leaveWorkspace: (id: number) => request<{ ok: true }>(`/api/workspaces/${id}/leave`, { method: 'POST' }),
   lookupPerson: (query: string) =>

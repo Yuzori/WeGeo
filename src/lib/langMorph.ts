@@ -40,7 +40,7 @@ function shouldMorphWidth(el: HTMLElement, display: string) {
 }
 
 function shouldMorphHeight(el: HTMLElement) {
-  if (el.matches('.lp-btn, .lp-chip, .lp-nav-links a, .lp-nav-profile-name, .settings-morph')) return false;
+  if (el.matches('.lp-btn, .lp-chip, .lp-nav-links a, .lp-nav-profile-name, .settings-morph, .settings-back, .settings-lang-btn')) return false;
   if (el.closest('h1, h2, h3')) return false;
   const tag = el.tagName;
   return tag === 'P' || el.classList.contains('lp-command');

@@ -349,15 +349,52 @@ export function LeadSkeleton() {
   );
 }
 
-/** Boussole dessinée, utilisée dans les écrans vides. */
+/** Boussole animée pour les écrans vides. */
 export function Compass({ className }: { className?: string }) {
+  const [pulse, setPulse] = useState(false);
+
+  const bump = () => {
+    setPulse(true);
+    window.setTimeout(() => setPulse(false), 620);
+  };
+
   return (
-    <svg viewBox="0 0 96 96" className={className} aria-hidden fill="none">
-      <circle cx="48" cy="48" r="42" stroke="currentColor" strokeWidth="1.5" opacity="0.35" />
-      <circle cx="48" cy="48" r="32" stroke="currentColor" strokeWidth="1" strokeDasharray="2 5" opacity="0.5" />
-      <path d="M48 12v8M48 76v8M12 48h8M76 48h8" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M48 22 58 58 48 50 38 58Z" fill="currentColor" />
-    </svg>
+    <button
+      type="button"
+      className={cx('compass-btn', pulse && 'is-pulse', className)}
+      aria-hidden
+      tabIndex={-1}
+      onClick={bump}
+    >
+      <svg viewBox="0 0 96 96" className="compass-svg" fill="none">
+        <circle cx="48" cy="48" r="43" className="compass-ring" stroke="currentColor" strokeWidth="1.25" />
+        <circle cx="48" cy="48" r="34" className="compass-inner" stroke="currentColor" strokeWidth="0.85" />
+        <g className="compass-rose">
+          {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+            <line
+              key={deg}
+              x1="48"
+              y1="8"
+              x2="48"
+              y2={deg % 90 === 0 ? 16 : 13}
+              stroke="currentColor"
+              strokeWidth={deg % 90 === 0 ? 1.4 : 0.9}
+              opacity={deg % 90 === 0 ? 0.85 : 0.45}
+              transform={`rotate(${deg} 48 48)`}
+            />
+          ))}
+        </g>
+        <text x="48" y="21" textAnchor="middle" className="compass-n">N</text>
+        <text x="75" y="51" textAnchor="middle" className="compass-e">E</text>
+        <text x="48" y="79" textAnchor="middle" className="compass-s">S</text>
+        <text x="21" y="51" textAnchor="middle" className="compass-w">W</text>
+        <circle cx="48" cy="48" r="3.2" fill="currentColor" opacity="0.9" />
+        <g className="compass-needle">
+          <path d="M48 18 L54 50 L48 44 L42 50 Z" fill="currentColor" opacity="0.95" />
+          <path d="M48 78 L54 46 L48 52 L42 46 Z" fill="currentColor" opacity="0.28" />
+        </g>
+      </svg>
+    </button>
   );
 }
 
@@ -372,7 +409,7 @@ export function EmptyState({
 }) {
   return (
     <div className="rise-in flex flex-col items-center justify-center px-6 py-20 text-center">
-      <Compass className="mb-6 size-20 text-lime-deep" />
+      <Compass className="mb-6 size-20" />
       <h3 className="text-lg font-semibold">{title}</h3>
       {description && <p className="mt-2 max-w-md text-sm leading-relaxed text-muted">{description}</p>}
       {action && <div className="mt-6">{action}</div>}
@@ -426,7 +463,7 @@ export function Modal({
         <header className="flex items-start justify-between gap-4 border-b border-rule px-5 py-3.5">
           <div className="min-w-0">
             <h2 className="text-[15px] leading-snug font-semibold break-words">{title}</h2>
-            {subtitle && <p className="legend mt-1">{subtitle}</p>}
+            {subtitle && <p className="mt-1 text-xs leading-relaxed text-muted">{subtitle}</p>}
           </div>
           <IconButton label="Fermer" onClick={onClose}>
             <X className="size-4" />

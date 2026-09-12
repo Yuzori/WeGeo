@@ -18,7 +18,18 @@ import { StatStrip } from '../components/StatStrip';
 import { RecentSearches } from '../components/RecentSearches';
 import { Button, EmptyState, IconButton, LeadSkeleton, useToast } from '../components/ui';
 import { potential } from '../lib/lead';
-import { searchSessionKey, useLeadCollection, useMeta, useStored } from '../hooks';
+import {
+  LEGACY_SEARCH_CITY_KEY,
+  LEGACY_SEARCH_DOMAINS_KEY,
+  LEGACY_SEARCH_OPTIONS_KEY,
+  searchCityKey,
+  searchDomainsKey,
+  searchOptionsKey,
+  searchSessionKey,
+  useLeadCollection,
+  useMeta,
+  useStored,
+} from '../hooks';
 import { sessionPath } from '../workspace';
 import { useParams } from 'react-router-dom';
 
@@ -27,11 +38,16 @@ export function SearchPage() {
   const { user } = useAuth();
   const limits = userLimits(user);
   const { workspaceId } = useParams();
+  const wid = workspaceId ?? '0';
   const { meta, refreshMeta } = useMeta();
 
-  const [city, setCity] = useStored('wegeo.city', '');
-  const [domains, setDomains] = useStored<string[]>('wegeo.domains', []);
-  const [options, setOptions] = useStored<SearchOptions>('wegeo.options', DEFAULT_OPTIONS);
+  const [city, setCity] = useStored(searchCityKey(wid), '', LEGACY_SEARCH_CITY_KEY);
+  const [domains, setDomains] = useStored<string[]>(searchDomainsKey(wid), [], LEGACY_SEARCH_DOMAINS_KEY);
+  const [options, setOptions] = useStored<SearchOptions>(
+    searchOptionsKey(wid),
+    DEFAULT_OPTIONS,
+    LEGACY_SEARCH_OPTIONS_KEY,
+  );
 
   // Identifiant du dernier relevé lancé : c'est lui qui permet de retrouver la
   // session après un changement d'onglet ou une fermeture du navigateur.

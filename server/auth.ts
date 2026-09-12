@@ -12,7 +12,15 @@ import { DEV_PLAN_LIMITS, PLAN_LIMITS, type PlanLimits } from '../shared/plans.t
 import db, { ensurePersonalWorkspace } from './db.ts';
 import { googleAuthUrl, googleConfigured, exchangeGoogleCode } from './google.ts';
 import { mailConfigured, sendCodeEmail, type MailPurpose } from './mail.ts';
-import { avatarUrl, clearAvatar, hasAvatar, saveAvatarDataUrl, saveAvatarFromUrl } from './avatars.ts';
+import {
+  applyRecentAvatar,
+  avatarUrl,
+  clearAvatar,
+  hasAvatar,
+  recentAvatarUrls,
+  saveAvatarDataUrl,
+  saveAvatarFromUrl,
+} from './avatars.ts';
 import { isHttpsRequest, publicBaseUrl } from './security.ts';
 import { normalizeUsername, usernameFromDisplayName, usernameSeedFromEmail, validateUsername } from './username.ts';
 
@@ -44,7 +52,14 @@ function pepper(): string {
   return process.env.NODE_ENV === 'production' ? '' : 'dev';
 }
 
+/**
+ * Comptes de développement, qui contournent l'abonnement et reçoivent les
+ * plafonds de l'offre la plus haute. Jamais actifs en production : une adresse
+ * laissée dans la variable d'environnement ouvrirait sinon un accès gratuit
+ * illimité à quiconque contrôle cette boîte e-mail.
+ */
 export function isDeveloperAccount(email: string): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
   const raw = process.env.DEV_ACCOUNT_EMAILS ?? '';
   const allowed = new Set(
     raw
@@ -267,6 +282,25 @@ function saveGoogle(userId: number, data: { googleId: string; refreshToken: stri
   ).run(data.googleId, refresh, data.accessToken, data.expiry, userId);
 }
 
+/**
+ * Ouvre une session et referme les précédentes. Sans cela un jeton dérobé
+ * restait valable trente jours, même après que la victime se soit reconnectée
+ * ou ait changé son mot de passe.
+ */
+function createFreshSession(userId: number): string {
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  return createSession(userId);
+}
+
+/** Ferme les sessions de l'utilisateur, sauf celle passée en argument. */
+function revokeOtherSessions(userId: number, keepToken?: string): void {
+  if (keepToken) {
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(userId, hashToken(keepToken));
+    return;
+  }
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+}
+
 function createSession(userId: number): string {
   const token = randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -342,6 +376,7 @@ export function toPublicUser(user: AuthUser): PublicUser {
     email: user.email,
     username: user.username,
     avatarUrl: avatarUrl(user.id),
+    recentAvatarUrls: recentAvatarUrls(user.id),
     needsUsername: user.needsUsername,
     hasPassword: user.hasPassword,
     createdAt: user.createdAt,
@@ -519,19 +554,19 @@ export async function resendCode(
 }
 
 export async function forgot(
-  emailRaw: string,
+  identifierRaw: string,
   locale?: string,
-): Promise<{ ok: true } | { error: string; status: number }> {
-  const email = normalizeEmail(emailRaw);
-  if (validateEmail(email)) return { ok: true };
-  const found = findUserByEmail(email);
+): Promise<{ ok: true; email?: string } | { error: string; status: number }> {
+  const identifier = identifierRaw.trim();
+  if (!identifier) return { ok: true };
+  const found = findUserByLogin(identifier);
   if (!found) return { ok: true };
   try {
-    await issueCode(email, 'reset', locale);
+    await issueCode(found.email, 'reset', locale);
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Impossible d’envoyer le code.', status: 503 };
   }
-  return { ok: true };
+  return { ok: true, email: found.email };
 }
 
 export async function resetPassword(
@@ -551,7 +586,8 @@ export async function resetPassword(
   if (!found) return { error: 'Compte introuvable.', status: 404 };
   setPasswordHash(found.id, await hashPassword(password));
   const fresh = findUserById(found.id)!;
-  return { user: fresh, token: createSession(fresh.id) };
+  // Le mot de passe vient de changer : toute session ouverte ailleurs tombe.
+  return { user: fresh, token: createFreshSession(fresh.id) };
 }
 
 type OauthState = { next: string; link: boolean; t: number };
@@ -598,12 +634,13 @@ export function startGoogle(req: Request, res: Response): void {
     return;
   }
   const sessionUser = userFromRequest(req);
+  const wantSheets = Boolean(sessionUser) || req.query.link === '1';
   const state = signOauthState({
     next: safeNext(typeof req.query.next === 'string' ? req.query.next : undefined),
-    link: Boolean(sessionUser) || req.query.link === '1',
+    link: wantSheets,
     t: Date.now(),
   });
-  res.redirect(googleAuthUrl(req, state));
+  res.redirect(googleAuthUrl(req, state, wantSheets));
 }
 
 async function applyGooglePhoto(userId: number, picture: string | null): Promise<void> {
@@ -648,7 +685,9 @@ export async function updateProfile(
     password?: string;
     currentPassword?: string;
     avatar?: string | null;
+    avatarRecent?: number;
   },
+  req?: Request,
 ): Promise<{ user: AuthUser } | { error: string; status: number }> {
   if (typeof body.username === 'string' && body.username.trim() && body.username !== user.username) {
     const claimed = claimUsername(user, body.username);
@@ -667,9 +706,21 @@ export async function updateProfile(
       }
     }
     setPasswordHash(user.id, await hashPassword(body.password));
+    // Les autres appareils perdent l'accès, la session courante est conservée.
+    revokeOtherSessions(user.id, req ? parseCookies(req.headers.cookie)[COOKIE] : undefined);
   }
 
-  if (body.avatar === null) {
+  if (body.avatarRecent !== undefined) {
+    const index = Number(body.avatarRecent);
+    if (!Number.isInteger(index) || index < 0) {
+      return { error: 'Photo récente invalide.', status: 400 };
+    }
+    try {
+      applyRecentAvatar(user.id, index);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Photo illisible.', status: 400 };
+    }
+  } else if (body.avatar === null) {
     clearAvatar(user.id);
   } else if (typeof body.avatar === 'string' && body.avatar.trim()) {
     try {

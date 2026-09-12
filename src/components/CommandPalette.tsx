@@ -38,7 +38,7 @@ const fold = (value: string) =>
     .toLowerCase();
 
 /**
- * Palette de commandes (Ctrl/⌘ + K) : navigation, réglages, et recherche
+ * Palette de commandes (Ctrl/⌘ + J) : navigation, réglages, et recherche
  * directe dans les prospects déjà enregistrés.
  */
 export function CommandPalette({

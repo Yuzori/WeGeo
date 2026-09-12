@@ -23,42 +23,129 @@ import {
   type Object3D,
 } from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { useI18n } from '../i18n';
 
+/*
+ * La mascotte se pose sur les éléments porteurs d'un attribut data-mascot.
+ *
+ * Deux règles tiennent tout le fichier :
+ *
+ * 1. Aucune lecture de mise en page pendant l'animation. Les branches sont
+ *    mesurées sur événement (scroll arrêté, resize, mutation du DOM) puis
+ *    conservées en coordonnées page. La boucle de rendu ne fait que du calcul.
+ *
+ * 2. Les cibles vivent en coordonnées page, pas écran. Pendant un défilement la
+ *    mascotte reste donc collée à sa branche sans la poursuivre, ce qui supprime
+ *    le retard et les micro-sauts.
+ */
+
+const GLTF_CANDIDATES = ['/model-optimized.glb', '/model.glb', '/model.gltf'];
 const FBX_URL = '/prospy.fbx?full=1';
+
+let gltfLoader: GLTFLoader | null = null;
+
+function mascotGltfLoader(): GLTFLoader {
+  if (gltfLoader) return gltfLoader;
+  const draco = new DRACOLoader();
+  draco.setDecoderPath('/draco/');
+  draco.preload();
+  gltfLoader = new GLTFLoader();
+  gltfLoader.setDRACOLoader(draco);
+  return gltfLoader;
+}
 const LIME_DAY = 0xd2f54c;
 const LIME_NIGHT = 0xd6fa58;
 
-type FbxReady = { object: Object3D; fromFbx: boolean };
-let fbxShared: FbxReady | null = null;
-let fbxStarted = false;
-const fbxWaiters: Array<(ready: FbxReady) => void> = [];
+/** Côté du canvas de rendu, en pixels CSS. Il suit la mascotte au lieu de couvrir l'écran. */
+const STAGE = 176;
+const STAGE_LANDING = 208;
+const CAM_FOV = 28;
+const CAM_Z = 8;
+const WORLD_H = 2 * Math.tan(((CAM_FOV * Math.PI) / 180) / 2) * CAM_Z;
+/** Épaisseur visuelle du logo après simplification du GLB (axe X/Z). */
+const MASCOT_BULK = 1.18;
 
-function startFbxLoad() {
-  if (fbxStarted || typeof window === 'undefined') return;
-  fbxStarted = true;
+function isMobileViewport(): boolean {
+  return window.matchMedia('(max-width: 767px), (pointer: coarse)').matches;
+}
+
+/** DPR réel pour le buffer WebGL. */
+function renderDpr(onLanding: boolean): number {
+  const dpr = window.devicePixelRatio || 1;
+  const mobile = isMobileViewport();
+  if (onLanding) {
+    if (mobile) return Math.min(2, Math.max(1.25, dpr));
+    return Math.min(2.5, Math.max(1.5, dpr));
+  }
+  return Math.min(mobile ? 1.75 : 2, Math.max(1, dpr));
+}
+
+function scrollSettleMs(): number {
+  return isMobileViewport() ? 160 : 110;
+}
+
+/** Hauteur de visée dans le viewport pour choisir une branche. */
+const AIM = 0.36;
+/** Temps minimum passé sur une branche avant d'en changer. */
+const DWELL = 520;
+/** Accroupissement avant le décollage. */
+const CROUCH = 90;
+/** Au-delà, la mascotte quitte la barre même si le scroll continue. */
+const HOME_LEAVE = 72;
+/** En dessous, et seulement là, elle a le droit de rentrer au logo. */
+const HOME_RETURN = 40;
+
+type MascotSource = 'gltf' | 'fbx' | 'fallback';
+type ModelReady = { object: Object3D; source: MascotSource };
+
+let modelShared: ModelReady | null = null;
+let modelStarted = false;
+const modelWaiters: Array<(ready: ModelReady) => void> = [];
+
+function resolveModel(ready: ModelReady) {
+  modelShared = ready;
+  modelWaiters.splice(0).forEach((fn) => fn(ready));
+}
+
+function loadFbxFallback() {
   const loader = new FBXLoader();
   loader.load(
     FBX_URL,
-    (fbx) => {
-      fbxShared = { object: fbx, fromFbx: true };
-      fbxWaiters.splice(0).forEach((fn) => fn(fbxShared!));
-    },
+    (fbx) => resolveModel({ object: fbx, source: 'fbx' }),
     undefined,
-    () => {
-      fbxShared = { object: fallbackPin(), fromFbx: false };
-      fbxWaiters.splice(0).forEach((fn) => fn(fbxShared!));
-    },
+    () => resolveModel({ object: fallbackPin(), source: 'fallback' }),
   );
 }
 
-function onFbxReady(cb: (ready: FbxReady) => void) {
-  startFbxLoad();
-  if (fbxShared) cb(fbxShared);
-  else fbxWaiters.push(cb);
+function loadGltfCandidate(index: number) {
+  const url = GLTF_CANDIDATES[index];
+  if (!url) {
+    loadFbxFallback();
+    return;
+  }
+  mascotGltfLoader().load(
+    url,
+    (gltf) => resolveModel({ object: gltf.scene, source: 'gltf' }),
+    undefined,
+    () => loadGltfCandidate(index + 1),
+  );
 }
 
-startFbxLoad();
+function startModelLoad() {
+  if (modelStarted || typeof window === 'undefined') return;
+  modelStarted = true;
+  loadGltfCandidate(0);
+}
+
+function onModelReady(cb: (ready: ModelReady) => void) {
+  startModelLoad();
+  if (modelShared) cb(modelShared);
+  else modelWaiters.push(cb);
+}
+
+startModelLoad();
 
 function clamp(v: number, a = 0, b = 1): number {
   return Math.min(b, Math.max(a, v));
@@ -80,6 +167,11 @@ function smoothAngle(current: number, target: number, dt: number, tau: number): 
   return current + angleDelta(current, target) * (1 - Math.exp(-dt / Math.max(0.04, tau)));
 }
 
+/** Départ posé, arrivée posée. Le vol ne commence ni ne finit brutalement. */
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 function brandLime(dark: boolean): number {
   return dark ? LIME_NIGHT : LIME_DAY;
 }
@@ -90,7 +182,7 @@ function paintBrand(root: Object3D, dark: boolean) {
     if (!(node instanceof Mesh)) return;
     node.castShadow = false;
     node.receiveShadow = false;
-    node.frustumCulled = false;
+    node.frustumCulled = true;
     const geo = node.geometry;
     if (geo && !geo.getAttribute('normal')) geo.computeVertexNormals();
     const current = node.material;
@@ -133,27 +225,30 @@ function fallbackPin(): Group {
   return group;
 }
 
-function extractLogo(root: Object3D): Group {
+function extractMascotMeshes(root: Object3D): Group {
   root.updateMatrixWorld(true);
   const group = new Group();
   const pos = new Vector3();
   const quat = new Quaternion();
   const scl = new Vector3();
   const seen = new Set<string>();
+  let namedCurves = false;
+  root.traverse((node) => {
+    if (node instanceof Mesh && /curve002|curve003/i.test(node.name)) namedCurves = true;
+  });
   root.traverse((node) => {
     if (!(node instanceof Mesh)) return;
-    if (!/curve002|curve003/i.test(node.name)) return;
-    const key = node.name.replace(/\.\d+$/, '').toLowerCase();
+    if (namedCurves && !/curve002|curve003/i.test(node.name)) return;
+    const key = node.name ? node.name.replace(/\.\d+$/, '').toLowerCase() : node.uuid;
     if (seen.has(key)) return;
     seen.add(key);
     const mesh = node.clone();
-    mesh.geometry = node.geometry.clone();
-    mesh.material = Array.isArray(node.material) ? node.material.map((item) => item.clone()) : node.material.clone();
+    mesh.geometry = node.geometry;
     node.matrixWorld.decompose(pos, quat, scl);
     mesh.position.copy(pos);
     mesh.quaternion.copy(quat);
     mesh.scale.copy(scl);
-    mesh.name = node.name;
+    mesh.name = node.name || key;
     group.add(mesh);
   });
   return group;
@@ -172,14 +267,16 @@ function refit(wrap: Group) {
   box.getSize(size);
   inner.position.sub(center);
   inner.scale.multiplyScalar(1 / Math.max(size.y, 1e-4));
+  inner.scale.x *= MASCOT_BULK;
+  inner.scale.z *= MASCOT_BULK;
   inner.updateMatrixWorld(true);
   box.setFromObject(inner);
   box.getCenter(center);
   inner.position.sub(center);
 }
 
-function buildMascot(object: Object3D, fromFbx: boolean): Group {
-  const extracted = fromFbx ? extractLogo(object) : object;
+function buildMascot(object: Object3D, source: MascotSource): Group {
+  const extracted = source === 'fallback' ? object : extractMascotMeshes(object);
   const inner = new Group();
   inner.add(extracted);
   const wrap = new Group();
@@ -189,42 +286,41 @@ function buildMascot(object: Object3D, fromFbx: boolean): Group {
   return wrap;
 }
 
-function worldAtPixel(camera: PerspectiveCamera, cx: number, cy: number) {
-  const dist = camera.position.z;
-  const vFov = (camera.fov * Math.PI) / 180;
-  const worldH = 2 * Math.tan(vFov / 2) * dist;
-  return {
-    x: (cx / window.innerWidth - 0.5) * worldH * camera.aspect,
-    y: -(cy / window.innerHeight - 0.5) * worldH,
-    unit: worldH / window.innerHeight,
-  };
-}
+/* ------------------------------------------------------------------ branches */
 
 type Perch = {
   id: string;
   el: HTMLElement | null;
-  x: number;
-  y: number;
-  s: number;
   kind: string;
-  line: string;
-  top: number;
-  off?: boolean;
+  /** Centre horizontal, en pixels page. */
+  x: number;
+  /** Centre vertical, en pixels page. Écran si `fixed`. */
+  y: number;
+  /** Taille visée de la mascotte, en pixels. */
+  s: number;
+  /** Vrai pour les branches ancrées au viewport (barre de navigation). */
+  fixed: boolean;
 };
 
-const elIds = new WeakMap<HTMLElement, number>();
-let elSeq = 0;
-function eid(el: HTMLElement): number {
-  let id = elIds.get(el);
-  if (id == null) {
-    id = ++elSeq;
-    elIds.set(el, id);
+function navSize(nav: HTMLElement | null, logo: HTMLElement | null): number {
+  if (nav) {
+    const h = nav.getBoundingClientRect().height || 48;
+    return Math.round(Math.min(36, Math.max(30, h * 0.72)));
   }
-  return id;
+  const h = logo?.getBoundingClientRect().height ?? 42;
+  return Math.round(clamp(h * 0.88, 32, 44));
 }
 
+function perchSize(): number {
+  const w = window.innerWidth;
+  if (w < 640) return Math.round(clamp(w * 0.13, 46, 56));
+  if (w < 1024) return 62;
+  return 70;
+}
+
+/** Le logo visible le plus grand, sur la landing comme dans l'application. */
 function pickVisibleLogo(source: HTMLElement | null): HTMLElement | null {
-  const nodes = [...document.querySelectorAll<HTMLElement>('.lp-nav-logo, .app-logo-slot')];
+  const nodes = document.querySelectorAll<HTMLElement>('.lp-nav-logo, .app-logo-slot');
   let best: HTMLElement | null = null;
   let bestArea = 0;
   for (const el of nodes) {
@@ -240,204 +336,180 @@ function pickVisibleLogo(source: HTMLElement | null): HTMLElement | null {
   return best ?? source;
 }
 
-function navSize(): number {
-  const bar = document.querySelector('.lp-nav') as HTMLElement | null;
-  if (bar) {
-    const h = bar.getBoundingClientRect().height || 48;
-    return Math.round(Math.min(36, Math.max(30, h * 0.72)));
-  }
-  const slot = pickVisibleLogo(null);
-  const h = slot?.getBoundingClientRect().height ?? 42;
-  return Math.round(clamp(h * 0.88, 32, 44));
+/**
+ * Point d'appui à l'intérieur d'un élément, en coordonnées page.
+ * La mascotte se pose sur l'arête haute, comme un oiseau sur une branche.
+ */
+function navCeiling(): number {
+  const wrap = document.querySelector<HTMLElement>('.lp-nav-wrap');
+  return (wrap?.getBoundingClientRect().bottom ?? 56) + 12;
 }
 
-function perchSize(): number {
-  const w = window.innerWidth;
-  if (w < 640) return Math.round(clamp(w * 0.13, 48, 58));
-  return 70;
+/** La mascotte ne doit jamais passer sous la barre de navigation. */
+function clearsNav(perch: Perch, scrollY: number): boolean {
+  if (perch.kind === 'home' || perch.kind === 'dock' || perch.fixed) return true;
+  const y = perch.y - scrollY;
+  const top = y - perch.s * 0.55;
+  return top >= navCeiling();
 }
 
-function homePerch(source: HTMLElement | null, line: string): Perch {
-  const mark = pickVisibleLogo(source);
-  const logo = mark?.getBoundingClientRect();
-  const bar = document.querySelector('.lp-nav')?.getBoundingClientRect();
-  const s = navSize();
-  const open = Boolean(logo && logo.width > 8);
-  const y = open && logo ? logo.top + logo.height / 2 : bar ? bar.top + bar.height / 2 : 24;
-  return {
-    id: 'home',
-    el: mark ?? source,
-    x: open && logo ? logo.left + logo.width / 2 : bar ? bar.left + 22 : 28,
-    y,
-    s,
-    kind: 'home',
-    line,
-    top: y,
-  };
-}
-
-function sitOn(el: HTMLElement, lines: Record<string, string>, mode: 'strict' | 'near' = 'strict'): Perch | null {
+function measurePerch(el: HTMLElement, size: number): Perch | null {
   const r = el.getBoundingClientRect();
   if (r.width < 16 || r.height < 16) return null;
-  const vh = window.innerHeight;
   const kind = el.dataset.mascot ?? el.dataset.guide ?? 'spot';
+  const sx = window.scrollX;
+  const sy = window.scrollY;
+  const vw = window.innerWidth;
 
   if (kind === 'dock') {
-    const inView = r.bottom > 8 && r.top < vh - 8;
-    const approaching = r.top < vh + 280;
-    if (mode === 'strict' && !inView) return null;
-    if (mode === 'near' && !inView && !approaching) return null;
     return {
-      id: `${eid(el)}:dock`,
+      id: `${kind}:${el.dataset.mascotId ?? 'dock'}`,
       el,
-      x: r.left + r.width / 2,
-      y: r.top + r.height / 2,
-      s: navSize(),
       kind,
-      line: '',
-      top: r.top,
-      off: !inView,
+      x: r.left + sx + r.width / 2,
+      y: r.top + sy + r.height / 2,
+      s: Math.round(clamp(r.height * 1.05, 34, 52)),
+      fixed: false,
     };
   }
 
-  const vis = r.bottom > 110 && r.top < vh - 48;
-  const approaching = r.top < vh + 520 && r.bottom > 80;
-  if (mode === 'strict' && !vis) return null;
-  if (mode === 'near' && !vis && !approaching) return null;
+  // Assise : les pieds touchent l'arête, le corps dépasse au-dessus.
+  const seat = size * 0.2;
+  let x = r.left + sx + 34;
+  let y = r.top + sy - seat;
 
-  const s = perchSize();
-  let x = r.left + 28;
-  let y = r.top + 22;
-  if (kind === 'feature' || kind === 'trust') {
-    x = r.left + 32;
-    y = r.top + 18;
-  } else if (kind === 'plan') {
-    x = r.right - 32;
-    y = r.top + 20;
+  if (kind === 'plan') {
+    x = r.right + sx - 34;
+  } else if (kind === 'product' || kind === 'band') {
+    x = r.left + sx + 44;
   } else if (kind === 'launch' || kind === 'cta') {
+    const heading = el.querySelector('h2, .lp-h2');
+    const hr = heading?.getBoundingClientRect();
+    if (hr && hr.height > 8) {
+      x = hr.left + sx + 26;
+      y = hr.top + sy - seat;
+    } else {
+      x = r.left + sx + r.width * 0.5;
+      y = r.top + sy + r.height * 0.24;
+    }
+  } else if (kind === 'step' || kind === 'steps') {
     const heading = el.querySelector('h2');
     const hr = heading?.getBoundingClientRect();
     if (hr && hr.height > 8) {
-      x = clamp(hr.left + 28, 64, window.innerWidth - 36);
-      y = hr.top + Math.min(22, hr.height * 0.28);
-    } else {
-      x = r.left + r.width * 0.5;
-      y = vis ? r.top + r.height * 0.28 : vh * 0.42;
+      x = hr.left + sx + Math.min(40, hr.width * 0.12);
+      y = hr.top + sy - seat;
     }
-  } else if (kind === 'pipeline' || kind === 'search' || kind === 'results' || kind === 'invite') {
-    x = r.left + 56;
-    y = r.top + 22;
+  } else if (kind === 'search' || kind === 'results' || kind === 'pipeline' || kind === 'invite') {
+    x = r.left + sx + 52;
   }
-  x = clamp(x, 64, window.innerWidth - 36);
-  if (!vis && approaching) {
-    y = clamp(r.top + 18, vh * 0.5, vh - 64);
-  } else {
-    y = clamp(y, 108, vh - 56);
+
+  const edge = vw < 640 ? 44 : 56;
+  x = clamp(x, sx + edge, sx + vw - edge);
+  return { id: `${kind}:${el.dataset.mascotId ?? ''}`, el, kind, x, y, s: size, fixed: false };
+}
+
+/* ---------------------------------------------------------- lettres remuées */
+
+/**
+ * Les centres des lettres sont mémorisés une fois en coordonnées page.
+ * La boucle ne fait plus que de l'arithmétique et n'écrit que sur les lettres
+ * réellement atteintes, au lieu de mesurer puis repositionner les six cents.
+ */
+type Field = {
+  els: HTMLElement[];
+  cx: Float32Array;
+  cy: Float32Array;
+  ox: Float32Array;
+  oy: Float32Array;
+  live: Set<number>;
+};
+
+function buildField(): Field {
+  let els = [...document.querySelectorAll<HTMLElement>('.lp-glyph')];
+  // Au-delà d'un certain volume on remue les mots, pas les lettres.
+  if (els.length > 900) els = [...document.querySelectorAll<HTMLElement>('.lp-split-word')];
+  for (const el of els) el.style.transform = '';
+  const n = els.length;
+  const field: Field = {
+    els,
+    cx: new Float32Array(n),
+    cy: new Float32Array(n),
+    ox: new Float32Array(n),
+    oy: new Float32Array(n),
+    live: new Set(),
+  };
+  const sx = window.scrollX;
+  const sy = window.scrollY;
+  for (let i = 0; i < n; i++) {
+    const r = els[i].getBoundingClientRect();
+    field.cx[i] = r.left + sx + r.width * 0.5;
+    field.cy[i] = r.top + sy + r.height * 0.5;
   }
-  const line = lines[kind] ?? lines.hero;
-  return { id: `${eid(el)}:${kind}`, el, x, y, s, kind, line, top: r.top, off: !vis };
+  return field;
 }
 
-function collectPerches(source: HTMLElement | null, lines: Record<string, string>): Perch[] {
-  const list: Perch[] = [homePerch(source, lines.home)];
-  document.querySelectorAll<HTMLElement>('[data-mascot]').forEach((el) => {
-    const spot = sitOn(el, lines, 'strict') ?? sitOn(el, lines, 'near');
-    if (spot) list.push(spot);
-  });
-  return list;
-}
-
-function visiblyHere(perch?: Perch): boolean {
-  if (!perch || perch.off) return false;
-  if (perch.kind === 'dock') return true;
-  return perch.top > 100 && perch.top < window.innerHeight * 0.82;
-}
-
-function pickPerch(perches: Perch[], currentId: string, scrollY: number, rushing: boolean): Perch {
-  const home = perches[0];
-  const vh = window.innerHeight;
-  if (scrollY < 72) return home;
-  const spots = perches.filter((p) => p.id !== 'home');
-  if (!spots.length) return home;
-
-  const dock = spots.find((p) => p.kind === 'dock');
-  if (dock && !dock.off) return dock;
-
-  const inBand = (p: Perch) => p.kind !== 'dock' && !p.off && p.top > 100 && p.top < vh * 0.78;
-  const vis = spots.filter(inBand);
-  const aim = Math.min(210, vh * 0.32);
-  const score = (p: Perch) => Math.abs(p.top - aim);
-  if (vis.length) {
-    const ranked = [...vis].sort((a, b) => score(a) - score(b) || a.x - b.x);
-    const best = ranked[0];
-    if (rushing) return best;
-    const cur = vis.find((p) => p.id === currentId);
-    if (cur && score(cur) <= score(best) + 40) return cur;
-    return best;
-  }
-  const coming = spots.filter((p) => p.kind !== 'dock' && p.off && p.top > 100).sort((a, b) => a.top - b.top);
-  if (coming.length) return coming[0];
-  if (dock) return dock;
-  return spots.find((p) => p.id === currentId) ?? spots[spots.length - 1] ?? home;
-}
-
-const glyphOff = new WeakMap<HTMLElement, { x: number; y: number }>();
-
-function stirCopy(mx: number, my: number, radius: number, dt: number, rushing: boolean) {
-  const glyphs = document.querySelectorAll<HTMLElement>('.lp-glyph');
-  if (!glyphs.length) return;
-  const kIn = 1 - Math.exp(-dt / (rushing ? 0.05 : 0.07));
+function stirField(field: Field | null, px: number, py: number, radius: number, dt: number, brisk: boolean) {
+  if (!field) return;
+  const { els, cx, cy, ox, oy, live } = field;
+  const kIn = 1 - Math.exp(-dt / (brisk ? 0.05 : 0.075));
   const kOut = 1 - Math.exp(-dt / 0.3);
   const maxForce = Math.min(46, radius * 0.2);
-  for (let i = 0; i < glyphs.length; i++) {
-    const g = glyphs[i];
-    const box = g.getBoundingClientRect();
-    if (box.width < 1) continue;
-    const cur = glyphOff.get(g) ?? { x: 0, y: 0 };
-    const restX = box.left + box.width * 0.5 - cur.x;
-    const restY = box.top + box.height * 0.5 - cur.y;
-    let tx = 0;
-    let ty = 0;
-    if (radius >= 8 && box.bottom > -80 && box.top < window.innerHeight + 80) {
-      const dx = restX - mx;
-      const dy = restY - my;
+  const r2 = radius * radius;
+  const touched = new Set<number>();
+
+  if (radius >= 8) {
+    for (let i = 0; i < cx.length; i++) {
+      const dx = cx[i] - px;
+      if (dx > radius || dx < -radius) continue;
+      const dy = cy[i] - py;
+      if (dy > radius || dy < -radius) continue;
       const d2 = dx * dx + dy * dy;
-      const reach = radius * radius;
-      if (d2 < reach && d2 > 1) {
-        const d = Math.sqrt(d2);
-        const t = 1 - d / radius;
-        const force = t * maxForce;
-        tx = (dx / d) * force;
-        ty = (dy / d) * force * 0.38;
-      }
+      if (d2 >= r2 || d2 <= 1) continue;
+      const d = Math.sqrt(d2);
+      const force = (1 - d / radius) * maxForce;
+      const tx = (dx / d) * force;
+      const ty = (dy / d) * force * 0.38;
+      ox[i] += (tx - ox[i]) * kIn;
+      oy[i] += (ty - oy[i]) * kIn;
+      els[i].style.transform = `translate3d(${ox[i].toFixed(2)}px,${oy[i].toFixed(2)}px,0)`;
+      touched.add(i);
+      live.add(i);
     }
-    const k = Math.hypot(tx, ty) > Math.hypot(cur.x, cur.y) + 0.3 ? kIn : kOut;
-    cur.x += (tx - cur.x) * k;
-    cur.y += (ty - cur.y) * k;
-    if (Math.abs(cur.x) < 0.12 && Math.abs(cur.y) < 0.12) {
-      g.style.transform = '';
-      glyphOff.delete(g);
+  }
+
+  for (const i of live) {
+    if (touched.has(i)) continue;
+    ox[i] += (0 - ox[i]) * kOut;
+    oy[i] += (0 - oy[i]) * kOut;
+    if (Math.abs(ox[i]) < 0.12 && Math.abs(oy[i]) < 0.12) {
+      ox[i] = 0;
+      oy[i] = 0;
+      els[i].style.transform = '';
+      live.delete(i);
     } else {
-      glyphOff.set(g, cur);
-      g.style.transform = `translate(${cur.x}px, ${cur.y}px)`;
+      els[i].style.transform = `translate3d(${ox[i].toFixed(2)}px,${oy[i].toFixed(2)}px,0)`;
     }
   }
 }
 
-function clearStir() {
-  document.querySelectorAll<HTMLElement>('.lp-glyph').forEach((g) => {
-    g.style.transform = '';
-  });
+function clearField(field: Field | null) {
+  if (!field) return;
+  for (const el of field.els) el.style.transform = '';
+  field.live.clear();
 }
+
+/* ------------------------------------------------------------------ composant */
 
 export function LogoFlight({
   sourceRef,
   onProgress,
   guideTarget = null,
+  guideActions = null,
 }: {
   sourceRef: RefObject<HTMLAnchorElement | null>;
   onProgress?: (progress: number, departed: boolean) => void;
   guideTarget?: string | null;
+  guideActions?: { onSkip: () => void; onNext: () => void; last: boolean } | null;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const hitRef = useRef<HTMLButtonElement>(null);
@@ -456,40 +528,21 @@ export function LogoFlight({
     const host = hostRef.current;
     const hit = hitRef.current;
     const say = sayRef.current;
+    const sayLine = say?.querySelector<HTMLElement>('.lp-mascot-say-text');
     const source = sourceRef.current;
-    if (!host || !hit || !say || !source) return;
+    if (!host || !hit || !say || !sayLine || !source) return;
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const onLanding = Boolean(document.querySelector('.landing:not(.auth-page)'));
+    const stageSize = onLanding ? STAGE_LANDING : STAGE;
     let dead = false;
     let frame = 0;
-    let model: Group | null = null;
-    let lastTheme = document.documentElement.classList.contains('dark');
-    const nearNow = new Set<HTMLElement>();
 
-    const pos = { x: 0, y: 0, s: 40 };
-    let spinY = 0.22;
-    let spinVel = 0;
-    let hop = 0;
-    let lastT = performance.now();
-    let destId = 'home';
-    let flying = false;
-    let arcSpan = 1;
-    const flightTo = { x: 0, y: 0, s: 40 };
-    let departed = false;
-    let clickI = 0;
-    let life = 0;
-    let lastScrollY = window.scrollY;
-    let spokenFor = 'home';
-    let hadGuide = Boolean(guideTarget);
-    let lookX = 0;
-    let lookY = 0;
-    let fidget = 0;
-    let fidgetIn = 3;
-    const pointer = { x: window.innerWidth * 0.5, y: 40 };
+    /* --- scène ------------------------------------------------------------ */
 
     const scene = new Scene();
-    const camera = new PerspectiveCamera(28, 1, 0.5, 40);
-    camera.position.set(0, 0, 8);
+    const camera = new PerspectiveCamera(CAM_FOV, 1, 0.5, 40);
+    camera.position.set(0, 0, CAM_Z);
 
     const hemi = new HemisphereLight(0xf4f7ea, 0x1a2214, 1);
     const key = new DirectionalLight(0xfff6e0, 1.15);
@@ -497,23 +550,29 @@ export function LogoFlight({
     const fill = new AmbientLight(0xd5ddc4, 0.38);
     scene.add(hemi, key, fill);
 
-    const renderer = new WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' });
+    const renderer = new WebGLRenderer({
+      alpha: true,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setClearColor(0x000000, 0);
-    renderer.setPixelRatio(Math.min(1.25, window.devicePixelRatio || 1));
     renderer.outputColorSpace = SRGBColorSpace;
     renderer.toneMapping = NoToneMapping;
+
+    const syncRenderer = () => {
+      renderer.setPixelRatio(renderDpr(onLanding));
+      renderer.setSize(stageSize, stageSize, false);
+    };
+    syncRenderer();
+
+    host.style.width = `${stageSize}px`;
+    host.style.height = `${stageSize}px`;
     host.appendChild(renderer.domElement);
 
-    const fit = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      camera.aspect = w / Math.max(1, h);
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h, false);
-      host.style.width = `${w}px`;
-      host.style.height = `${h}px`;
-    };
-    fit();
+    let model: Group | null = null;
+    let lastTheme = document.documentElement.classList.contains('dark');
+    /** Nombre d'images à redessiner coûte que coûte, même au repos. */
+    let needsRender = 3;
 
     const lightsForTheme = () => {
       const dark = document.documentElement.classList.contains('dark');
@@ -522,291 +581,658 @@ export function LogoFlight({
       key.intensity = dark ? 1.2 : 1.35;
       fill.intensity = dark ? 0.42 : 0.52;
       if (model) paintBrand(model, dark);
+      needsRender = 2;
     };
     lightsForTheme();
+
+    /* --- nœuds mis en cache ---------------------------------------------- */
+
+    let navEl = document.querySelector<HTMLElement>('.lp-nav');
+    let navWrap = document.querySelector<HTMLElement>('.lp-nav-wrap');
+    let logoEl: HTMLElement | null = pickVisibleLogo(source);
+    let logoSlots: HTMLElement[] = [];
+    let footerSlots: HTMLElement[] = [];
+
+    const refreshSlots = () => {
+      navEl = document.querySelector<HTMLElement>('.lp-nav');
+      navWrap = document.querySelector<HTMLElement>('.lp-nav-wrap');
+      logoSlots = [...document.querySelectorAll<HTMLElement>('.app-logo-slot, .lp-nav-logo')];
+      footerSlots = [...document.querySelectorAll<HTMLElement>('.lp-footer-logo')];
+    };
+    refreshSlots();
+
+    /* --- registre des branches ------------------------------------------- */
+
+    const registry = new Map<HTMLElement, Perch>();
+    let seq = 0;
+    let home: Perch = {
+      id: 'home',
+      el: logoEl,
+      kind: 'home',
+      x: 28,
+      y: 24,
+      s: 36,
+      fixed: true,
+    };
+
+    const measureHome = () => {
+      logoEl = pickVisibleLogo(source);
+      const logo = logoEl?.getBoundingClientRect();
+      const bar = navEl?.getBoundingClientRect();
+      const s = navSize(navEl, logoEl);
+      const open = Boolean(logo && logo.width > 8);
+      home = {
+        id: 'home',
+        el: logoEl ?? source,
+        kind: 'home',
+        x: open && logo ? logo.left + logo.width / 2 : bar ? bar.left + 22 : 28,
+        y: open && logo ? logo.top + logo.height / 2 : bar ? bar.top + bar.height / 2 : 24,
+        s,
+        fixed: true,
+      };
+    };
+
+    const syncRegistry = () => {
+      const found = new Set<HTMLElement>();
+      const size = perchSize();
+      document.querySelectorAll<HTMLElement>('[data-mascot]').forEach((el) => {
+        found.add(el);
+        if (!el.dataset.mascotId) el.dataset.mascotId = String(++seq);
+        const perch = measurePerch(el, size);
+        if (perch) registry.set(el, perch);
+        else registry.delete(el);
+      });
+      for (const el of [...registry.keys()]) {
+        if (found.has(el)) continue;
+        registry.delete(el);
+      }
+      measureHome();
+      pickDue = true;
+    };
+
+    /* --- état du mouvement ----------------------------------------------- */
+
+    const pos = { x: 0, y: 0, s: 36 };
+    let target: Perch = home;
+    let phase: 'perched' | 'crouch' | 'flight' = 'perched';
+    let flightT = 0;
+    let flightDur = 0;
+    let flightArc = 0;
+    let flightStart = { x: 0, y: 0 };
+    let crouchT = 0;
+    let landT = 99;
+    let switchedAt = 0;
+    let pickDue = true;
+    let scrollAt = 0;
+    let lastScrollY = window.scrollY;
+    let scrollSpeed = 0;
+
+    let spinY = 0.22;
+    let spinVel = 0;
+    let lookX = 0;
+    let lookY = 0;
+    let life = 0;
+    let fidget = 0;
+    let fidgetIn = 4.8;
+    let idleKind = 0;
+    let idleT = 0;
+    let lastT = performance.now();
+    let idleFrames = 0;
+    const pointer = { x: window.innerWidth * 0.5, y: 40 };
+
+    let field: Field | null = null;
+    let fieldDue = true;
+
+    /* --- parole ----------------------------------------------------------- */
 
     let clickSpeech = false;
     let fadeTimer = 0;
     let introTimer = 0;
+    let sayText = '';
+    let sayW = 0;
+    let sayH = 0;
     let sayX = 12;
     let sayY = 12;
     let sayInited = false;
+    let spokenFor = '';
+    let lastSayLeft = -1;
+    let lastSayTop = -1;
 
     const hushSay = () => {
       window.clearTimeout(fadeTimer);
       clickSpeech = false;
       sayInited = false;
+      sayText = '';
       say.classList.remove('is-out', 'is-on');
-      say.textContent = '';
+      sayLine.textContent = '';
     };
 
     const speak = (text: string, fromClick = false) => {
-      if (!text) return;
+      if (!text || text === sayText) {
+        if (text && fromClick) {
+          window.clearTimeout(fadeTimer);
+          fadeTimer = window.setTimeout(() => dismissClickSpeech(), 4200);
+        }
+        return;
+      }
       window.clearTimeout(fadeTimer);
       clickSpeech = fromClick;
+      sayText = text;
       say.classList.remove('is-out');
       say.classList.add('is-on');
-      say.textContent = text;
-      if (fromClick) {
-        fadeTimer = window.setTimeout(() => dismissClickSpeech(), 4200);
-      }
+      sayLine.textContent = text;
+      // Une seule mesure par phrase, jamais dans la boucle.
+      sayW = Math.max(40, say.offsetWidth);
+      sayH = Math.max(24, say.offsetHeight);
+      if (fromClick) fadeTimer = window.setTimeout(() => dismissClickSpeech(), 4200);
     };
 
     const dismissClickSpeech = () => {
-      if (!clickSpeech || !say.textContent) return;
+      if (!clickSpeech || !sayText) return;
       clickSpeech = false;
       say.classList.add('is-out');
       fadeTimer = window.setTimeout(() => hushSay(), 280);
     };
 
-    const poke = () => {
-      hop = destId === 'home' ? 0.38 : 0.5;
-      if (!reduced) spinVel += destId === 'home' ? 12.6 : 10.8;
-      if (guideTargetRef.current) return;
-      const clicks = linesRef.current.click;
-      speak(clicks[clickI % clicks.length], true);
-      clickI += 1;
-    };
-
-    const clearNear = () => {
-      for (const el of nearNow) el.classList.remove('is-mascot-near');
-      nearNow.clear();
-    };
-
-    const markNear = (el: HTMLElement | null) => {
-      if (el && !nearNow.has(el)) {
-        el.classList.add('is-mascot-near');
-        nearNow.add(el);
+    const lineFor = (kind: string): string => {
+      const lines = linesRef.current;
+      const guide = guideCopyRef.current;
+      const guiding = Boolean(guideTargetRef.current);
+      switch (kind) {
+        case 'home':
+          return lines.home;
+        case 'window':
+        case 'hero':
+          return lines.hero;
+        case 'steps':
+        case 'step':
+          return lines.steps;
+        case 'product':
+          return lines.product;
+        case 'band':
+          return lines.band;
+        case 'feature':
+          return lines.features;
+        case 'trust':
+          return lines.trust;
+        case 'plan':
+          return lines.pricing;
+        case 'cta':
+          return lines.cta;
+        case 'dock':
+          return lines.dock;
+        case 'logo':
+          return guide.steps.logo;
+        case 'search':
+          return guide.steps.search;
+        case 'launch':
+          return guiding ? guide.steps.launch : lines.launch;
+        case 'results':
+          return guide.steps.results;
+        case 'pipeline':
+          return guide.steps.pipeline;
+        case 'invite':
+          return guide.steps.invite;
+        default:
+          return lines.hero;
       }
-      for (const node of nearNow) {
-        if (node !== el) {
-          node.classList.remove('is-mascot-near');
-          nearNow.delete(node);
+    };
+
+    /* --- décollage -------------------------------------------------------- */
+
+    const resolve = (p: Perch) => ({
+      x: p.fixed ? p.x : p.x - window.scrollX,
+      y: p.fixed ? p.y : p.y - window.scrollY,
+    });
+
+    const takeOff = (to: Perch) => {
+      const a = { x: pos.x, y: pos.y };
+      const b = resolve(to);
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      target = to;
+      switchedAt = performance.now();
+      if (dist < 12 || reduced) {
+        phase = 'perched';
+        landT = 0;
+      } else {
+        phase = 'crouch';
+        crouchT = 0;
+        flightT = 0;
+        flightDur = clamp(420 + dist * 0.58, 420, 1100) / 1000;
+        flightArc = Math.min(64, dist * 0.16) + to.s * 0.12;
+        if (!reduced) spinVel += (b.x >= a.x ? 1 : -1) * clamp(dist / 240, 0.5, 2.6);
+      }
+      if (to.kind === 'home') {
+        hushSay();
+        spokenFor = to.id;
+      }
+      needsRender = 3;
+    };
+
+    const poke = () => {
+      if (!reduced) spinVel += target.kind === 'home' ? 9.2 : 7.6;
+      idleKind = 1;
+      idleT = 0;
+      needsRender = 3;
+    };
+
+    /* --- surbrillance de la branche --------------------------------------- */
+
+    let nearEl: HTMLElement | null = null;
+    const markNear = (el: HTMLElement | null) => {
+      if (el === nearEl) return;
+      nearEl?.classList.remove('is-mascot-near');
+      nearEl = el;
+      nearEl?.classList.add('is-mascot-near');
+    };
+
+    /* --- choix de la branche ---------------------------------------------- */
+
+    const screenY = (p: Perch, sy: number) => (p.fixed ? p.y : p.y - sy);
+
+    const anyVisible = (sy: number): Perch | null => {
+      const vh = window.innerHeight;
+      for (const perch of registry.values()) {
+        if (perch.kind === 'home' || perch.kind === 'dock') continue;
+        if (!clearsNav(perch, sy)) continue;
+        const y = screenY(perch, sy);
+        if (y >= navCeiling() && y <= vh * 0.92) return perch;
+      }
+      return null;
+    };
+
+    const choose = (now: number, sy: number): Perch => {
+      const g = guideTargetRef.current;
+      if (g) {
+        if (g === 'logo') return home;
+        const el = document.querySelector<HTMLElement>(`[data-guide="${g}"]`);
+        const perch = el ? measurePerch(el, perchSize()) : null;
+        if (perch && clearsNav(perch, sy)) return perch;
+        return home;
+      }
+
+      const onPage = target.kind !== 'home';
+      if (sy < HOME_RETURN) return home;
+      if (sy < HOME_LEAVE && !onPage) return home;
+
+      const vh = window.innerHeight;
+      const aim = vh * AIM;
+      let dock: Perch | null = null;
+      let best: Perch | null = null;
+      let bestScore = Infinity;
+
+      for (const perch of registry.values()) {
+        const y = screenY(perch, sy);
+        if (perch.kind === 'dock') {
+          if (y > vh * 0.2 && y < vh * 0.86) dock = perch;
+          continue;
+        }
+        if (!clearsNav(perch, sy)) continue;
+        if (y < -vh * 0.12 || y > vh * 0.9) continue;
+        const score = Math.abs(y - aim);
+        if (score < bestScore) {
+          bestScore = score;
+          best = perch;
         }
       }
+
+      if (dock && clearsNav(dock, sy)) return dock;
+
+      const current = target.el ? (registry.get(target.el) ?? (onPage ? target : null)) : onPage ? target : null;
+
+      const nextBelowNav = (): Perch | null => {
+        let pick: Perch | null = null;
+        let pickY = Infinity;
+        for (const perch of registry.values()) {
+          if (perch.kind === 'home' || perch.kind === 'dock') continue;
+          if (!clearsNav(perch, sy)) continue;
+          const y = screenY(perch, sy);
+          if (y < navCeiling() || y > vh * 0.92) continue;
+          if (y < pickY) {
+            pickY = y;
+            pick = perch;
+          }
+        }
+        return pick;
+      };
+
+      if (!best) {
+        const below = nextBelowNav();
+        if (below) return below;
+        if (current && current.kind !== 'home' && clearsNav(current, sy)) return current;
+        if (sy > HOME_LEAVE) {
+          for (const perch of registry.values()) {
+            if (perch.kind === 'home' || perch.kind === 'dock') continue;
+            if (!clearsNav(perch, sy)) continue;
+            const y = screenY(perch, sy);
+            if (y > -vh * 0.08 && y < vh * 0.92) return perch;
+          }
+        }
+        if (sy > HOME_LEAVE) {
+          const visible = anyVisible(sy);
+          if (visible) return visible;
+          if (current && clearsNav(current, sy)) return current;
+        }
+        return sy < HOME_RETURN ? home : anyVisible(sy) ?? current ?? home;
+      }
+      if (target.id === best.id) return best;
+
+      if (current && current.kind !== 'home' && current.kind !== 'dock') {
+        if (!clearsNav(current, sy)) return best;
+        const curY = screenY(current, sy);
+        const stillHere = curY > -vh * 0.06 && curY < vh * 0.88;
+        if (stillHere) {
+          const dwell = scrollSpeed > 120 ? DWELL * 0.45 : onLanding ? DWELL * 0.62 : DWELL;
+          if (now - switchedAt < dwell) return current;
+          const curScore = Math.abs(curY - aim);
+          if (curScore < bestScore + vh * 0.16) return current;
+        }
+      }
+      return best;
     };
 
-    const startFlight = (to: Perch, rushing = false) => {
-      const fromHome = destId === 'home' && to.id !== 'home';
-      const dist = Math.hypot(to.x - pos.x, to.y - pos.y);
-      flightTo.x = to.x;
-      flightTo.y = to.y;
-      flightTo.s = to.s;
-      arcSpan = Math.max(1, dist);
-      flying = dist > 14;
-      destId = to.id;
-      if (to.kind === 'home' || to.kind === 'dock') {
-        hushSay();
-        spokenFor = to.kind === 'dock' ? to.id : 'home';
-      } else if (to.line) {
-        speak(to.line);
-        spokenFor = to.id;
-      } else {
-        hushSay();
-      }
-      hop = Math.max(hop, fromHome ? 0.58 : rushing ? 0.28 : 0.44);
-      if (!reduced) spinVel += fromHome ? 3.6 : rushing ? 1.8 : 2.5;
-    };
+    /* --- boucle ----------------------------------------------------------- */
 
     const applyFrame = (now: number) => {
       if (!model) return;
-      const mark = sourceRef.current;
-      if (!mark) return;
-
       const dt = Math.min(0.033, (now - lastT) / 1000) || 0.016;
       lastT = now;
       life += dt;
-      const dark = document.documentElement.classList.contains('dark');
-      if (dark !== lastTheme) lightsForTheme();
+
+      if (document.documentElement.classList.contains('dark') !== lastTheme) lightsForTheme();
 
       const sy = window.scrollY;
-      const rawSpd = (sy - lastScrollY) / Math.max(dt, 0.008);
+      const dy = sy - lastScrollY;
       lastScrollY = sy;
-      const rushing = Math.abs(rawSpd) > 640;
+      if (Math.abs(dy) > 0.5) {
+        scrollAt = now;
+        scrollSpeed = Math.abs(dy) / Math.max(dt, 0.008);
+      } else if (now - scrollAt > scrollSettleMs()) {
+        scrollSpeed = 0;
+      }
+      const settled = now - scrollAt > scrollSettleMs();
+      const scrolling = !settled && scrollSpeed > 48;
 
-      const lines = linesRef.current;
-      const guide = guideCopyRef.current;
+      // Remesure à l'arrêt. Le choix, lui, n'a lieu que sur événement
+      // (scroll, resize, mutation) : le recalculer chaque image faisait
+      // navette dès qu'un témoin d'intersection clignotait.
+      if (settled && pickDue) {
+        for (const [el, perch] of registry) {
+          const fresh = measurePerch(el, perch.s);
+          if (fresh) registry.set(el, { ...fresh, id: perch.id });
+        }
+        measureHome();
+      }
+
+      const guided = Boolean(guideTargetRef.current);
+      const onPage = target.kind !== 'home';
+      const vhNow = window.innerHeight;
+      const tracked = target.el ? (registry.get(target.el) ?? target) : target;
+      const offScreen =
+        !guided &&
+        phase === 'perched' &&
+        tracked.kind !== 'home' &&
+        tracked.kind !== 'dock' &&
+        (!clearsNav(tracked, sy) ||
+          screenY(tracked, sy) < -vhNow * 0.1 ||
+          screenY(tracked, sy) > vhNow * 0.92);
+
+      // Pendant le geste elle reste collée à sa branche (coordonnées page) :
+      // monter ou descendre est une translation, jamais un saut. On ne
+      // change de branche qu'à l'arrêt, sauf pour quitter la barre ou si
+      // la branche actuelle sort de l'écran.
+      if (!guided && phase === 'perched' && !onPage && sy > HOME_LEAVE) {
+        const next = choose(now, sy);
+        if (next.kind !== 'home') takeOff(next);
+      } else if (offScreen && settled) {
+        const next = choose(now, sy);
+        if (next.id !== target.id) takeOff(next);
+      } else if (guided || (settled && phase === 'perched' && pickDue)) {
+        const next = choose(now, sy);
+        if (next.id !== target.id) takeOff(next);
+        else target = next;
+        if (!guided) pickDue = false;
+      }
+      if (target.kind === 'home') target = home;
+
+      /* position */
+      const dest = resolve(target);
+      if (phase === 'crouch') {
+        crouchT += dt * 1000;
+        if (crouchT >= CROUCH) {
+          phase = 'flight';
+          flightT = 0;
+          // Départ = là où la mascotte est visuellement, pas le perchoir d'origine
+          // en coordonnées page (sinon saccade navbar → héros au début du vol).
+          flightStart = { x: pos.x, y: pos.y };
+        }
+      } else if (phase === 'flight') {
+        flightT += dt;
+        const t = clamp(flightT / flightDur);
+        const e = easeInOutCubic(t);
+        pos.x = flightStart.x + (dest.x - flightStart.x) * e;
+        pos.y = flightStart.y + (dest.y - flightStart.y) * e - flightArc * Math.sin(Math.PI * e);
+        pos.s = smoothTo(pos.s, target.s, dt, 0.2);
+        if (t >= 1) {
+          phase = 'perched';
+          landT = 0;
+          pickDue = true;
+        }
+      } else if (phase === 'perched') {
+        const pageScroll = Math.abs(dy) > 0.5;
+        if (scrolling || pageScroll) {
+          // Collée à la branche pendant le scroll : pas de lissage (sinon retard visible).
+          pos.x = dest.x;
+          pos.y = dest.y;
+          pos.s = target.s;
+        } else {
+          const bobX = Math.sin(life * 0.62) * (target.kind === 'home' ? 0.6 : 1.9);
+          const bobY = Math.cos(life * 0.47) * (target.kind === 'home' ? 0.5 : 1.6);
+          pos.x = smoothTo(pos.x, dest.x + bobX, dt, onLanding ? 0.07 : 0.09);
+          pos.y = smoothTo(pos.y, dest.y + bobY, dt, onLanding ? 0.07 : 0.09);
+          pos.s = smoothTo(pos.s, target.s, dt, 0.22);
+        }
+      }
+
+      const flying = phase === 'flight';
+      const parked = target.kind === 'home' || target.kind === 'dock';
+
+      /* parole */
       const g = guideTargetRef.current;
-      if (!g && hadGuide) {
+      // La barre de navigation est le seul perchoir silencieux : la mascotte y
+      // attend sans commenter. Partout ailleurs elle explique la zone.
+      const mute = target.kind === 'home' && !g;
+      if (!flying && !mute && !clickSpeech) {
+        const line = lineFor(target.kind);
+        if (line && target.id !== spokenFor) {
+          spokenFor = target.id;
+          speak(line);
+        } else if (line && sayText && sayText !== line && !say.classList.contains('is-out')) {
+          speak(line);
+        }
+      } else if (mute && !clickSpeech && sayText && spokenFor !== target.id) {
         hushSay();
-        spokenFor = 'home';
       }
-      hadGuide = Boolean(g);
-      const lineMap: Record<string, string> = {
-        home: lines.home,
-        window: lines.hero,
-        hero: lines.hero,
-        product: lines.product,
-        feature: lines.features,
-        trust: lines.trust,
-        plan: lines.pricing,
-        cta: lines.cta,
-        dock: lines.dock,
-        logo: guide.steps.logo,
-        search: guide.steps.search,
-        launch: g ? guide.steps.launch : lines.product,
-        results: guide.steps.results,
-        pipeline: guide.steps.pipeline,
-        invite: guide.steps.invite,
-      };
-      const home = homePerch(mark, lineMap.home);
-      let next: Perch;
-      let perchLive: Perch | undefined;
-      if (g) {
-        if (g === 'logo') next = home;
-        else {
-          const el = document.querySelector<HTMLElement>(`[data-guide="${g}"]`);
-          next = (el && sitOn(el, lineMap, 'near')) || home;
-        }
-        perchLive = next;
-      } else {
-        const perches = collectPerches(mark, lineMap);
-        perchLive = perches.find((p) => p.id === destId);
-        next = reduced ? perches[0] : pickPerch(perches, destId, sy, rushing);
+      if (g === 'logo' && target.id === 'home' && spokenFor !== 'guide:logo') {
+        spokenFor = 'guide:logo';
+        speak(guideCopyRef.current.steps.logo);
       }
 
-      if (next.id !== destId) startFlight(next, rushing || (!g && destId !== 'home' && !visiblyHere(perchLive)));
-      const perch = perchLive && perchLive.id === destId ? perchLive : next;
-      departed = destId !== 'home';
-      if (perch) {
-        flightTo.x = perch.x;
-        flightTo.y = perch.y;
-        flightTo.s = perch.s;
-      }
-
-      const dist = Math.hypot(flightTo.x - pos.x, flightTo.y - pos.y);
-      flying = flying ? dist > 10 : dist > 24;
-      const parked = destId === 'home' || perch?.kind === 'dock';
-      const idleAmp = parked ? 0.1 : flying ? 0 : 0.22;
-      const idleX = Math.sin(life * 0.52) * 4.5 * idleAmp;
-      const idleY = Math.cos(life * 0.41) * 3.2 * idleAmp;
-      const progress = clamp(1 - dist / arcSpan);
-      const lift = flying ? Math.sin(progress * Math.PI) * Math.min(82, arcSpan * 0.22) : 0;
-      const tau = reduced ? 0.07 : dist > 260 ? 0.11 : dist > 90 ? 0.17 : 0.3;
-      pos.x = smoothTo(pos.x, flightTo.x + idleX, dt, tau);
-      pos.y = smoothTo(pos.y, flightTo.y + idleY - lift, dt, tau);
-      pos.s = smoothTo(pos.s, flightTo.s, dt, flying ? 0.16 : 0.24);
-
-      if (perch?.kind === 'dock' && (say.textContent || clickSpeech)) hushSay();
-
-      if (!flying && !parked && destId !== spokenFor && perch?.line) {
-        spokenFor = destId;
-        speak(perch.line);
-      }
-
-      if (clickSpeech) {
-        const clicks = lines.click;
-        if (clicks.length) {
-          const nextClick = clicks[(clickI - 1 + clicks.length) % clicks.length];
-          if (say.textContent !== nextClick) speak(nextClick, true);
-        }
-      } else if (say.textContent && !say.classList.contains('is-out') && perch?.kind !== 'dock') {
-        const wanted = g === 'logo' && destId === 'home' ? guide.steps.logo : perch?.line;
-        if (wanted && say.textContent !== wanted) speak(wanted);
-      }
-
-      if (!reduced && !flying) {
+      /* impatience : micro-gestes aléatoires, sans rebond */
+      if (!onLanding && !reduced && !flying) {
         fidget += dt;
         if (fidget > fidgetIn) {
           fidget = 0;
-          fidgetIn = 2.5 + Math.random() * 2.8;
-          hop = parked ? 0.2 : 0.38;
-          if (Math.random() > 0.35) spinVel += (Math.random() - 0.3) * 3.4;
+          fidgetIn = 4.2 + Math.random() * 6.8;
+          const roll = Math.random();
+          if (roll < 0.28) {
+            idleKind = 1;
+            spinVel += (Math.random() > 0.5 ? 1 : -1) * (0.85 + Math.random() * 1.15);
+          } else if (roll < 0.54) {
+            idleKind = 2;
+            idleT = 0;
+          } else if (roll < 0.78) {
+            idleKind = 3;
+            idleT = 0;
+          } else {
+            idleKind = 0;
+          }
         }
+        if (idleKind === 2 || idleKind === 3) idleT += dt;
       }
 
-      if (g === 'logo' && destId === 'home' && spokenFor !== 'guide:logo') {
-        spokenFor = 'guide:logo';
-        speak(guide.steps.logo);
-      }
-
-      hop = smoothTo(hop, 0, dt, 0.18);
+      /* rotation */
       const spinning = Math.abs(spinVel) > 0.18;
-      const lookGain = reduced || flying ? 0.1 : spinning ? 0.08 : parked ? 0.5 : 0.85;
+      const lookGain = reduced || flying ? 0.18 : spinning ? 0.12 : 0.92;
       const nx = (pointer.x - pos.x) / Math.max(160, window.innerWidth * 0.36);
       const ny = (pointer.y - pos.y) / Math.max(110, window.innerHeight * 0.3);
       lookY = smoothTo(lookY, clamp(-nx, -1, 1) * 0.32 * lookGain, dt, 0.15);
       lookX = smoothTo(lookX, clamp(ny, -1, 1) * 0.18 * lookGain, dt, 0.17);
       const face = 0.22 + lookY;
-      const travel = flying ? (flightTo.x >= pos.x ? 0.85 : -0.65) : 0;
-      spinY += spinVel * dt + travel * dt;
+      const travelDir = flying ? (dest.x >= pos.x ? 1 : -1) : 0;
+      spinY += spinVel * dt + travelDir * 0.9 * dt;
       const tauF = flying ? 0.36 : 0.72 + Math.min(0.4, Math.abs(spinVel) * 0.045);
       spinVel *= Math.exp(-dt / tauF);
       if (Math.abs(spinVel) < 0.12 && !flying) {
         spinVel = 0;
-        spinY = smoothAngle(spinY, face, dt, 0.4);
+        spinY = smoothAngle(spinY, face, dt, 0.45);
       }
 
-      const amp = parked ? 0.2 : 1;
-      const bounce = Math.sin(hop * Math.PI) * (parked ? 1.8 : 5.2);
-      const squash = hop * (parked ? 0.03 : 0.08);
-      const breathe = Math.sin(life * 1.55) * (parked ? 0.45 : 1.05);
-      const sway = Math.sin(life * 0.7) * 0.35 * amp;
-      const nod = Math.sin(life * 1.2) * 0.032 * amp;
-      const tilt = Math.sin(life * 0.88 + 0.8) * 0.03 * amp;
-      const lean = flying ? 0.11 * (flightTo.x >= pos.x ? 1 : -1) : tilt + lookY * 0.12;
-      const drawX = pos.x + sway * 0.18;
-      const drawY = pos.y - bounce + breathe;
-      const at = worldAtPixel(camera, drawX, drawY);
-      model.position.set(at.x, at.y, 0);
-      model.rotation.set(0.04 + nod + lookX, spinY, lean);
+      /* atterrissage et accroupissement */
+      if (landT < 5) landT += dt;
+      const land = landT < 0.7 ? -0.2 * Math.exp(-landT * 8.5) * Math.cos(landT * 24) : 0;
+      const crouch = phase === 'crouch' ? -0.12 * Math.sin((crouchT / CROUCH) * Math.PI) : 0;
+      const squash = land + crouch;
+      const flutter = flying ? Math.sin(flightT * 26) * 1.5 * (1 - clamp(flightT / flightDur)) : 0;
+      const breathe = Math.sin(life * 1.5) * (parked ? 0.7 : 0.95);
+      const amp = parked ? 0.55 : 1;
+      const nod = Math.sin(life * 1.15) * 0.03 * amp;
+      const tilt = Math.sin(life * 0.85 + 0.8) * 0.028 * amp;
+      const idleLeanX = idleKind === 2 ? Math.sin(idleT * 2.1) * 0.055 : 0;
+      const idleLeanZ = idleKind === 2 ? Math.cos(idleT * 1.65) * 0.038 : 0;
+      const idleDrift = idleKind === 3 ? Math.sin(idleT * 1.35) * 1.8 : 0;
+      const lean = flying ? 0.13 * travelDir : tilt + lookY * 0.12 + idleLeanZ;
+
+      const drawX = pos.x + idleDrift * 0.35;
+      const drawY = pos.y + breathe + flutter + idleDrift * 0.22;
+
+      /* rendu : le canvas suit la mascotte, il ne couvre pas l'écran */
+      const scale = (WORLD_H * pos.s) / stageSize;
+      model.position.set(0, 0, 0);
+      model.rotation.set(0.04 + nod + lookX + idleLeanX, spinY, lean);
+      model.scale.set(scale * (1 - squash * 0.7), scale * (1 + squash), scale);
       const inner = model.children[0] as Group | undefined;
       if (inner) inner.rotation.set(nod * 0.35 + lookX * 0.45, lookY * 0.28, tilt * 0.55);
-      const unit = Math.max(0.001, pos.s * at.unit);
-      model.scale.set(unit * (1 + squash), unit * (1 - squash * 0.7), unit);
 
-      stirCopy(drawX, drawY, parked ? 0 : flying || rushing ? pos.s * 2.5 + 130 : pos.s * 0.85 + 34, dt, rushing || flying);
+      host.style.transform = `translate3d(${(drawX - stageSize / 2).toFixed(1)}px,${(drawY - stageSize / 2).toFixed(1)}px,0)`;
+      const hitMin = isMobileViewport() ? 48 : 34;
+      const hitSize = Math.round(Math.max(hitMin, pos.s * 0.92));
+      if (hit.dataset.size !== String(hitSize)) {
+        hit.dataset.size = String(hitSize);
+        hit.style.width = `${hitSize}px`;
+        hit.style.height = `${hitSize}px`;
+      }
+      hit.style.transform = `translate3d(${(drawX - hitSize / 2).toFixed(1)}px,${(drawY - hitSize / 2).toFixed(1)}px,0)`;
 
-      markNear(flying ? null : perch?.el ?? null);
+      /* lettres remuées — désactivé sur la landing (centaines de nœuds DOM). */
+      if (!onLanding) {
+        if (fieldDue && settled) {
+          fieldDue = false;
+          clearField(field);
+          field = buildField();
+        }
+        const brisk = flying || scrollSpeed > 640;
+        const stirRadius = reduced
+          ? 0
+          : brisk
+            ? pos.s * 2.4 + 120
+            : target.kind === 'home' || target.kind === 'dock'
+              ? 0
+              : pos.s * 0.85 + 34;
+        stirField(
+          field,
+          drawX + window.scrollX,
+          drawY + window.scrollY,
+          stirRadius,
+          dt,
+          brisk,
+        );
+      }
 
-      const menuOpen = Boolean(document.querySelector('.lp-nav-wrap.is-open'));
+      markNear(flying ? null : target.el);
+
+      const menuOpen = Boolean(navWrap?.classList.contains('is-open'));
+      const root = document.documentElement;
+      root.style.setProperty('--lp-mx', clamp(drawX / window.innerWidth, 0, 1).toFixed(4));
+      root.style.setProperty('--lp-my', clamp(drawY / window.innerHeight, 0, 1).toFixed(4));
+      root.style.setProperty('--lp-mascot-active', flying || menuOpen ? '0' : '1');
+
+      /* couches et logos, écritures uniquement sur changement */
       const guiding = Boolean(g);
-      const visLogo = pickVisibleLogo(mark);
-      const layer = guiding ? 'guide' : menuOpen ? 'front' : departed ? 'front' : 'nav';
-      host.classList.toggle('is-nav', layer === 'nav');
-      host.classList.toggle('is-front', layer === 'front');
-      host.classList.toggle('is-guide', layer === 'guide');
-      host.classList.toggle('is-behind', false);
-      hit.classList.toggle('is-nav', layer === 'nav');
-      hit.classList.toggle('is-guide', guiding);
-      host.style.opacity = menuOpen && !guiding ? '0' : '1';
-      document.querySelectorAll<HTMLElement>('.app-logo-slot, .lp-nav-logo').forEach((el) => {
-        el.classList.toggle('is-3d', destId === 'home' && el === visLogo && (guiding || !menuOpen));
-        el.classList.toggle('is-spinning', destId === 'home' && el === visLogo && (spinning || flying));
-      });
-      document.querySelectorAll<HTMLElement>('.lp-footer-logo').forEach((el) => {
-        el.classList.toggle('is-3d', perch?.kind === 'dock');
-        el.classList.toggle('is-spinning', perch?.kind === 'dock' && (spinning || flying));
-      });
+      const departed = target.id !== 'home';
+      const layer = guiding ? 'guide' : menuOpen || departed ? 'front' : 'nav';
+      if (host.dataset.layer !== layer) {
+        host.dataset.layer = layer;
+        host.classList.toggle('is-nav', layer === 'nav');
+        host.classList.toggle('is-front', layer === 'front');
+        host.classList.toggle('is-guide', layer === 'guide');
+        hit.classList.toggle('is-nav', layer === 'nav');
+        hit.classList.toggle('is-guide', guiding);
+      }
+      const hidden = menuOpen && !guiding ? '0' : '1';
+      if (host.style.opacity !== hidden) {
+        host.style.opacity = hidden;
+        hit.style.pointerEvents = hidden === '0' ? 'none' : 'auto';
+      }
+      const atHome = target.id === 'home';
+      const homeState = `${atHome ? 1 : 0}${spinning || flying ? 1 : 0}${guiding || !menuOpen ? 1 : 0}`;
+      if (host.dataset.homeState !== homeState) {
+        host.dataset.homeState = homeState;
+        for (const el of logoSlots) {
+          const on = atHome && el === logoEl && (guiding || !menuOpen);
+          el.classList.toggle('is-3d', on);
+          el.classList.toggle('is-spinning', on && (spinning || flying));
+        }
+      }
+      const docked = target.kind === 'dock';
+      const dockState = `${docked ? 1 : 0}${spinning || flying ? 1 : 0}`;
+      if (host.dataset.dockState !== dockState) {
+        host.dataset.dockState = dockState;
+        for (const el of footerSlots) {
+          el.classList.toggle('is-3d', docked);
+          el.classList.toggle('is-spinning', docked && (spinning || flying));
+        }
+      }
 
-      const hitSize = Math.max(32, pos.s);
-      hit.style.width = `${hitSize}px`;
-      hit.style.height = `${hitSize}px`;
-      hit.style.left = `${drawX}px`;
-      hit.style.top = `${drawY}px`;
-      hit.style.pointerEvents = menuOpen && !guiding ? 'none' : 'auto';
-      hit.setAttribute('aria-label', lines.home);
-
+      /* bulle : à côté, jamais sur le corps. Masquée pendant le vol. */
+      if (flying) sayInited = false;
       const fading = say.classList.contains('is-out');
-      const talking = (!menuOpen || guiding) && (Boolean(say.textContent) || fading);
-      say.classList.toggle('is-on', talking);
+      const talking = (!menuOpen || guiding) && !flying && (Boolean(sayText) || fading || guiding);
+      if (say.classList.contains('is-on') !== talking) say.classList.toggle('is-on', talking);
       if (talking) {
         const pad = 12;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        const w = Math.max(40, say.offsetWidth);
-        const h = Math.max(24, say.offsetHeight);
-        const gap = Math.max(10, pos.s * 0.16);
-        const leftSlot = drawX - pos.s * 0.42 - gap - w;
-        const fromRight = leftSlot >= pad;
-        const targetLeft = clamp(
-          fromRight ? leftSlot : drawX + pos.s * 0.42 + gap,
-          pad,
-          Math.max(pad, vw - w - pad),
-        );
-        let targetTop = drawY - h * 0.45;
-        if (targetTop < pad + 8) targetTop = drawY - h * 0.12;
-        targetTop = clamp(targetTop, pad, Math.max(pad, vh - h - pad));
+        const body = Math.max(28, pos.s * 0.55);
+        const gap = Math.max(18, pos.s * 0.24);
+        const leftSlot = drawX - body - gap - sayW;
+        const rightSlot = drawX + body + gap;
+        const canLeft = leftSlot >= pad;
+        const canRight = rightSlot + sayW <= vw - pad;
+        const fromRight = canLeft || !canRight;
+        let targetLeft = fromRight ? leftSlot : rightSlot;
+        let targetTop = drawY - sayH * 0.5;
+        if (!canLeft && !canRight) {
+          targetLeft = clamp(drawX - sayW * 0.5, pad, Math.max(pad, vw - sayW - pad));
+          targetTop = drawY - body - gap - sayH;
+          if (targetTop < pad) targetTop = drawY + body + gap;
+        } else {
+          targetLeft = clamp(targetLeft, pad, Math.max(pad, vw - sayW - pad));
+        }
+        const hitX = targetLeft < drawX + body && targetLeft + sayW > drawX - body;
+        const hitY = targetTop < drawY + body && targetTop + sayH > drawY - body;
+        if (hitX && hitY) targetTop = drawY - body - gap - sayH;
+        targetTop = clamp(targetTop, pad, Math.max(pad, vh - sayH - pad));
         if (!sayInited) {
           sayX = targetLeft;
           sayY = targetTop;
@@ -816,83 +1242,168 @@ export function LogoFlight({
           sayX += (targetLeft - sayX) * k;
           sayY += (targetTop - sayY) * k;
         }
-        say.style.left = `${sayX}px`;
-        say.style.top = `${sayY}px`;
-        if (!fading) say.style.transform = 'none';
+        const l = Math.round(sayX);
+        const t = Math.round(sayY);
+        if (l !== lastSayLeft) {
+          lastSayLeft = l;
+          say.style.left = `${l}px`;
+        }
+        if (t !== lastSayTop) {
+          lastSayTop = t;
+          say.style.top = `${t}px`;
+        }
         say.classList.toggle('is-from-right', fromRight);
         say.classList.toggle('is-from-left', !fromRight);
       }
       say.classList.toggle('is-nav-say', parked);
       say.classList.toggle('is-guide-say', guiding);
 
-      onProgressRef.current?.(departed ? 1 : 0, departed);
+      if (host.dataset.departed !== String(departed)) {
+        host.dataset.departed = String(departed);
+        onProgressRef.current?.(departed ? 1 : 0, departed);
+      }
+
+      /* faut-il vraiment redessiner ? */
+      const busy = Boolean(
+        flying ||
+          scrolling ||
+          phase === 'crouch' ||
+          landT < 0.7 ||
+          spinning ||
+          Math.abs(pos.x - dest.x) > 0.3 ||
+          Math.abs(pos.y - dest.y) > 0.3 ||
+          field?.live.size,
+      );
+      idleFrames = busy ? 0 : idleFrames + 1;
+      if (busy) needsRender = 2;
+      else needsRender = Math.max(needsRender, 1);
     };
+
+    let modalOpen = false;
 
     const tick = (now: number) => {
       if (dead) return;
       if (document.hidden) {
-        frame = 0;
+        frame = requestAnimationFrame(tick);
         return;
       }
       applyFrame(now);
-      const modalOpen = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(
-        (el) => !el.classList.contains('app-guide'),
-      );
-      if (!modalOpen) renderer.render(scene, camera);
+      if (!modalOpen && needsRender > 0) {
+        renderer.render(scene, camera);
+        needsRender--;
+      }
       frame = requestAnimationFrame(tick);
     };
 
-    const mount = (object: Object3D, fromFbx: boolean) => {
+    // La carte de la landing insère des épingles en continu. Sans garde-fou,
+    // chaque insertion relancerait une mesure complète de la page.
+    let domTimer = 0;
+    let glyphCount = 0;
+    const domWatch = new MutationObserver(() => {
+      window.clearTimeout(domTimer);
+      domTimer = window.setTimeout(() => {
+        if (dead) return;
+        modalOpen = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(
+          (el) => !el.classList.contains('app-guide'),
+        );
+        refreshSlots();
+        syncRegistry();
+        const glyphs = document.querySelectorAll('.lp-glyph').length;
+        if (glyphs !== glyphCount) {
+          glyphCount = glyphs;
+          fieldDue = true;
+        }
+        needsRender = 2;
+      }, 420);
+    });
+    // La landing insère des épingles carte en continu : l'observateur global
+    // relançait des remesures en boucle et faisait saccader la mascotte.
+    if (!onLanding) domWatch.observe(document.body, { childList: true, subtree: true });
+
+    /* --- montage ---------------------------------------------------------- */
+
+    const mount = (object: Object3D, modelSource: MascotSource) => {
       if (dead || model) return;
-      const wrap = buildMascot(object, fromFbx);
-    const inner = wrap.children[0] as Group | undefined;
-    const logo = inner?.children[0] as Group | undefined;
-    if (fromFbx && (!logo || logo.children.length < 1)) {
-      mount(fallbackPin(), false);
-      return;
-    }
+      const wrap = buildMascot(object, modelSource);
+      const inner = wrap.children[0] as Group | undefined;
+      const logo = inner?.children[0] as Group | undefined;
+      if (modelSource !== 'fallback' && (!logo || logo.children.length < 1)) {
+        mount(fallbackPin(), 'fallback');
+        return;
+      }
       model = wrap;
       scene.add(wrap);
-      const start = homePerch(source, linesRef.current.home);
+      syncRegistry();
+      measureHome();
+      target = home;
+      const start = resolve(home);
       pos.x = start.x;
       pos.y = start.y;
-      pos.s = start.s;
-      destId = 'home';
-      flightTo.x = start.x;
-      flightTo.y = start.y;
-      flightTo.s = start.s;
+      pos.s = home.s;
       source.classList.add('is-3d');
       source.classList.remove('is-3d-wait');
       lastT = performance.now();
       tick(lastT);
       window.clearTimeout(introTimer);
       introTimer = window.setTimeout(() => {
-        if (dead || destId !== 'home' || say.textContent || guideTargetRef.current) return;
-        speak(linesRef.current.home);
-      }, 900);
+        if (dead || target.id !== 'home' || sayText || guideTargetRef.current) return;
+        spokenFor = target.id;
+        speak(linesRef.current.home, true);
+      }, 1100);
     };
 
-    onFbxReady(({ object, fromFbx }) => {
+    onModelReady(({ object, source: modelSource }) => {
       if (dead) return;
-      mount(object, fromFbx);
+      mount(object, modelSource);
     });
+
+    /* --- écouteurs -------------------------------------------------------- */
 
     const themeWatch = new MutationObserver(lightsForTheme);
     themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    window.addEventListener('resize', fit);
+
+    let resizeTimer = 0;
+    const onResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        if (dead) return;
+        syncRenderer();
+        refreshSlots();
+        syncRegistry();
+        fieldDue = true;
+        needsRender = 2;
+      }, 130);
+    };
+    window.addEventListener('resize', onResize);
+    const viewport = window.visualViewport;
+    const onViewport = () => {
+      pickDue = true;
+      needsRender = 2;
+    };
+    viewport?.addEventListener('resize', onViewport);
+    viewport?.addEventListener('scroll', onViewport);
+    if (onLanding) window.addEventListener('load', onViewport, { once: true });
+
     const onPointer = (e: PointerEvent) => {
       pointer.x = e.clientX;
       pointer.y = e.clientY;
+      needsRender = Math.max(needsRender, 1);
     };
     window.addEventListener('pointermove', onPointer, { passive: true });
+
+    const onScroll = () => {
+      pickDue = true;
+      needsRender = 3;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+
     const onVisibility = () => {
       if (dead || document.hidden) return;
-      if (!frame) {
-        lastT = performance.now();
-        frame = requestAnimationFrame(tick);
-      }
+      lastT = performance.now();
+      needsRender = 2;
     };
     document.addEventListener('visibilitychange', onVisibility);
+
     const onHit = (e: Event) => {
       e.preventDefault();
       e.stopPropagation();
@@ -901,15 +1412,33 @@ export function LogoFlight({
     hit.addEventListener('click', onHit);
     source.addEventListener('click', onHit);
 
+    if (document.fonts?.ready) {
+      void document.fonts.ready.then(() => {
+        if (dead) return;
+        syncRegistry();
+        fieldDue = true;
+      });
+    }
+
     return () => {
       dead = true;
       window.clearTimeout(fadeTimer);
       window.clearTimeout(introTimer);
+      window.clearTimeout(resizeTimer);
       cancelAnimationFrame(frame);
-      clearNear();
+      markNear(null);
+      document.documentElement.style.removeProperty('--lp-mx');
+      document.documentElement.style.removeProperty('--lp-my');
+      document.documentElement.style.removeProperty('--lp-mascot-active');
+      window.clearTimeout(domTimer);
       themeWatch.disconnect();
-      window.removeEventListener('resize', fit);
+      domWatch.disconnect();
+      window.removeEventListener('resize', onResize);
+      viewport?.removeEventListener('resize', onViewport);
+      viewport?.removeEventListener('scroll', onViewport);
+      if (onLanding) window.removeEventListener('load', onViewport);
       window.removeEventListener('pointermove', onPointer);
+      window.removeEventListener('scroll', onScroll);
       document.removeEventListener('visibilitychange', onVisibility);
       hit.removeEventListener('click', onHit);
       source.removeEventListener('click', onHit);
@@ -917,7 +1446,7 @@ export function LogoFlight({
       document.querySelectorAll<HTMLElement>('.app-logo-slot, .lp-nav-logo, .lp-footer-logo').forEach((el) => {
         el.classList.remove('is-3d', 'is-3d-wait', 'is-spinning');
       });
-      clearStir();
+      clearField(field);
       scene.clear();
       renderer.dispose();
       renderer.domElement.remove();
@@ -928,7 +1457,19 @@ export function LogoFlight({
     <>
       <div ref={hostRef} className="lp-logo-canvas is-nav" aria-hidden />
       <button type="button" ref={hitRef} className="lp-mascot-hit" aria-label={m.mascot.home} />
-      <div ref={sayRef} className="lp-mascot-say" role="status" aria-live="polite" />
+      <div ref={sayRef} className="lp-mascot-say" role="status" aria-live="polite">
+        <p className="lp-mascot-say-text" />
+        {guideActions && (
+          <div className="lp-mascot-say-actions">
+            <button type="button" className="app-guide-skip" onClick={guideActions.onSkip}>
+              {m.guide.skip}
+            </button>
+            <button type="button" className="app-guide-next" onClick={guideActions.onNext}>
+              {guideActions.last ? m.guide.done : m.guide.next}
+            </button>
+          </div>
+        )}
+      </div>
     </>,
     document.body,
   );

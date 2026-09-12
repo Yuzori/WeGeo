@@ -19,9 +19,15 @@
     "probe:place": "tsx server/scripts/probe-place.ts",
     "probe:parallel": "tsx server/scripts/probe-parallel.ts",
     "shots": "tsx server/scripts/shots.ts",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false"
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly false",
+    "stripe:setup": "tsx server/scripts/stripe-setup.ts",
+    "images:landing": "tsx server/scripts/compress-landing-images.ts"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.8.2",
     "@stripe/stripe-js": "^9.14.0",
     "compression": "^1.8.1",
     "exceljs": "^4.4.0",
@@ -50,6 +56,7 @@
     "@vitejs/plugin-react": "^5.1.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4.1.16",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",

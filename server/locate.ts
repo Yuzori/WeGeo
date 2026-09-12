@@ -3,13 +3,15 @@ import type { Request } from 'express';
 
 export type VisitorPlace = {
   city: string;
+  region: string;
+  country: string;
   lat: number;
   lng: number;
 };
 
 const USER_AGENT = 'Prospy/1.0 (outil de prospection locale)';
 
-function isPrivateIp(ip: string): boolean {
+export function isPrivateIp(ip: string): boolean {
   const v4 = ip.replace(/^::ffff:/i, '');
   if (!v4 || v4 === 'unknown' || v4 === '::1' || v4 === '127.0.0.1') return true;
   if (/^10\./.test(v4) || /^127\./.test(v4) || /^192\.168\./.test(v4) || /^169\.254\./.test(v4)) return true;
@@ -28,21 +30,43 @@ function parseWho(data: unknown): VisitorPlace | null {
   const lat = Number(row.latitude);
   const lng = Number(row.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  const city = String(row.city || row.region || row.country || '')
+  const city = String(row.city || '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 48);
-  if (!city) return null;
-  return { city, lat, lng };
+  const region = String(row.region || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 48);
+  const country = String(row.country || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 48);
+  if (!city && !region && !country) return null;
+  return {
+    city: city || region || country,
+    region,
+    country,
+    lat,
+    lng,
+  };
 }
 
 export async function locateRequest(req: Request): Promise<VisitorPlace | null> {
   const ip = clientIp(req).replace(/^::ffff:/i, '');
   if (isPrivateIp(ip)) return null;
-  const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}?fields=success,city,region,country,latitude,longitude`, {
-    headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
-    signal: AbortSignal.timeout(4000),
-  });
+  const res = await fetch(
+    `https://ipwho.is/${encodeURIComponent(ip)}?fields=success,city,region,country,latitude,longitude`,
+    {
+      headers: { Accept: 'application/json', 'User-Agent': USER_AGENT },
+      signal: AbortSignal.timeout(4000),
+    },
+  );
   if (!res.ok) return null;
   return parseWho(await res.json());
+}
+
+export function geoLabel(geo: Pick<VisitorPlace, 'city' | 'region' | 'country'>): string {
+  const parts = [geo.city, geo.region, geo.country].filter(Boolean);
+  return [...new Set(parts)].join(', ');
 }

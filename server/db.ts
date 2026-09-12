@@ -125,6 +125,41 @@ function migrateTenancy(): void {
   migrateUsernames();
   addColumn('users', 'needs_username', 'INTEGER NOT NULL DEFAULT 0');
   migrateWorkspaces();
+  migrateUserGeo();
+}
+
+function migrateUserGeo(): void {
+  addColumn('users', 'geo_city', 'TEXT');
+  addColumn('users', 'geo_region', 'TEXT');
+  addColumn('users', 'geo_country', 'TEXT');
+  addColumn('users', 'geo_lat', 'REAL');
+  addColumn('users', 'geo_lng', 'REAL');
+  addColumn('users', 'last_seen_at', 'TEXT');
+}
+
+export function updateUserGeo(
+  userId: number,
+  geo: { city?: string | null; region?: string | null; country?: string | null; lat?: number | null; lng?: number | null },
+): void {
+  const ts = new Date().toISOString();
+  db.prepare(
+    `UPDATE users
+     SET geo_city = COALESCE(?, geo_city),
+         geo_region = COALESCE(?, geo_region),
+         geo_country = COALESCE(?, geo_country),
+         geo_lat = COALESCE(?, geo_lat),
+         geo_lng = COALESCE(?, geo_lng),
+         last_seen_at = ?
+     WHERE id = ?`,
+  ).run(
+    geo.city ?? null,
+    geo.region ?? null,
+    geo.country ?? null,
+    geo.lat ?? null,
+    geo.lng ?? null,
+    ts,
+    userId,
+  );
 }
 
 addColumn('leads', 'dirigeant', 'TEXT');
@@ -238,6 +273,8 @@ function migrateWorkspaces(): void {
     CREATE INDEX IF NOT EXISTS idx_invites_email ON workspace_invites(email, status);
   `);
   addColumn('workspaces', 'auto_named', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('workspaces', 'cover_style', 'TEXT');
+  addColumn('workspaces', 'logo_mode', 'TEXT');
 
   const users = db.prepare('SELECT id FROM users').all() as Row[];
   for (const user of users) ensurePersonalWorkspace(Number(user.id));

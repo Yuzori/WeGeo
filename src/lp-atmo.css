@@ -1,0 +1,646 @@
+/* Atmosphère Prospy — fond continu, lueurs floues, transitions imperceptibles. */
+
+.lp-atmo,
+.lp-fade,
+.lp-band,
+.lp-foot,
+.lp-glow,
+.lp-end {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Une seule toile : pas de dalle par section, donc pas de « trou noir » entre blocs. */
+.dark .lp-atmo,
+.dark .lp-fade,
+.dark .lp-band,
+.dark .lp-foot,
+.dark .lp-glow,
+.dark .lp-end {
+  background: transparent !important;
+}
+
+.lp-atmo::before,
+.lp-atmo::after,
+.lp-fade::before,
+.lp-fade::after,
+.lp-band::before,
+.lp-band::after {
+  content: none;
+  display: none;
+}
+
+.lp-aura {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+  transform: none !important;
+}
+
+.lp-cv > :not(.lp-aura):not(.lp-section-photo):not(.lp-feature-photo):not(.lp-trust-photo):not(.lp-plan-photo-full),
+.lp-frame > :not(.lp-aura):not(.lp-frame-seam),
+.lp-glow > .lp-hero-stage,
+.lp-glow > .lp-foot-cap,
+.lp-foot-inner,
+.lp-foot-copy,
+.lp-foot-rail {
+  position: relative;
+  z-index: 2;
+}
+
+.lp-aura::before,
+.lp-aura::after,
+.lp-aura-head::before,
+.lp-aura-head::after {
+  clip-path: none !important;
+  border-radius: 0 !important;
+  mix-blend-mode: normal !important;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+@keyframes lp-glow-float-a {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate3d(48px, -32px, 0) scale(1.05);
+    opacity: 0.78;
+  }
+}
+
+@keyframes lp-glow-float-b {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.42;
+  }
+  50% {
+    transform: translate3d(-40px, 30px, 0) scale(1.04);
+    opacity: 0.65;
+  }
+}
+
+@keyframes lp-glow-float-center {
+  0%,
+  100% {
+    transform: translateX(-50%) translate3d(0, 0, 0) scale(1);
+    opacity: 0.52;
+  }
+  50% {
+    transform: translateX(-50%) translate3d(36px, -22px, 0) scale(1.05);
+    opacity: 0.75;
+  }
+}
+
+@keyframes lp-glow-float-mid {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.48;
+  }
+  50% {
+    transform: translate(-50%, -50%) translate3d(28px, -18px, 0) scale(1.04);
+    opacity: 0.72;
+  }
+}
+
+@keyframes lp-glow-float-foot {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+    opacity: 0.62;
+  }
+  50% {
+    transform: translateX(-50%) translate3d(-28px, 18px, 0) scale(1.04);
+    opacity: 0.82;
+  }
+}
+
+.lp-aura-hero::before {
+  left: -12%;
+  top: -8%;
+  width: min(85vw, 54rem);
+  height: min(65vh, 36rem);
+  background: radial-gradient(
+    ellipse 72% 64% at 48% 42%,
+    color-mix(in oklab, var(--lp-lime) 14%, transparent),
+    transparent 72%
+  );
+  filter: blur(80px);
+  animation: lp-glow-float-a 23s ease-in-out infinite;
+}
+
+.lp-aura-hero::after {
+  right: -10%;
+  top: 8%;
+  width: min(55vw, 32rem);
+  height: min(45vw, 26rem);
+  background: radial-gradient(
+    ellipse 80% 70% at 60% 40%,
+    color-mix(in oklab, var(--lp-lime) 10%, transparent),
+    transparent 74%
+  );
+  filter: blur(72px);
+  animation: lp-glow-float-b 19s ease-in-out infinite;
+}
+
+.lp-aura-steps::before {
+  left: -8%;
+  top: 10%;
+  width: min(50vw, 26rem);
+  height: min(55vw, 28rem);
+  background: radial-gradient(
+    ellipse 85% 75% at 35% 45%,
+    color-mix(in oklab, var(--lp-lime) 11%, transparent),
+    transparent 72%
+  );
+  filter: blur(72px);
+  animation: lp-glow-float-b 22s ease-in-out infinite;
+}
+
+.lp-aura-steps::after {
+  right: -6%;
+  top: -4%;
+  width: min(48vw, 24rem);
+  height: min(38vw, 18rem);
+  background: radial-gradient(
+    ellipse 78% 68% at 55% 50%,
+    color-mix(in oklab, var(--lp-lime) 9%, transparent),
+    transparent 74%
+  );
+  filter: blur(68px);
+  animation: lp-glow-float-a 18s ease-in-out infinite;
+}
+
+.lp-aura-product::before {
+  left: -14%;
+  bottom: -8%;
+  width: min(75vw, 40rem);
+  height: min(50vw, 26rem);
+  background: radial-gradient(
+    ellipse 88% 78% at 32% 58%,
+    color-mix(in oklab, var(--lp-lime) 12%, transparent),
+    transparent 72%
+  );
+  filter: blur(76px);
+  animation: lp-glow-float-a 25s ease-in-out infinite;
+}
+
+.lp-aura-product::after {
+  right: -8%;
+  top: 5%;
+  width: min(42vw, 22rem);
+  height: min(35vw, 16rem);
+  background: radial-gradient(
+    ellipse 82% 72% at 50% 48%,
+    color-mix(in oklab, var(--lp-lime) 8%, transparent),
+    transparent 76%
+  );
+  filter: blur(64px);
+  animation: lp-glow-float-b 20s ease-in-out infinite;
+}
+
+.lp-aura-features::before {
+  right: -12%;
+  bottom: -10%;
+  width: min(90vw, 48rem);
+  height: min(60vw, 32rem);
+  background: radial-gradient(
+    ellipse 86% 76% at 42% 44%,
+    color-mix(in oklab, var(--lp-lime) 13%, transparent),
+    transparent 70%
+  );
+  filter: blur(84px);
+  animation: lp-glow-float-a 21s ease-in-out infinite;
+}
+
+.lp-aura-features::after {
+  left: -10%;
+  top: -6%;
+  width: min(52vw, 28rem);
+  height: min(40vw, 20rem);
+  background: radial-gradient(
+    ellipse 80% 70% at 40% 42%,
+    color-mix(in oklab, var(--lp-lime) 9%, transparent),
+    transparent 74%
+  );
+  filter: blur(70px);
+  animation: lp-glow-float-b 17s ease-in-out infinite;
+}
+
+.lp-aura-launch::before {
+  left: 50%;
+  top: 28%;
+  width: min(100vw, 50rem);
+  height: min(35vw, 18rem);
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse 92% 80% at 50% 50%,
+    color-mix(in oklab, var(--lp-lime) 12%, transparent),
+    transparent 72%
+  );
+  filter: blur(78px);
+  animation: lp-glow-float-center 14s ease-in-out infinite;
+}
+
+.lp-aura-launch::after {
+  left: 10%;
+  top: -8%;
+  width: min(45vw, 24rem);
+  height: min(38vw, 18rem);
+  background: radial-gradient(
+    ellipse 84% 74% at 45% 55%,
+    color-mix(in oklab, var(--lp-lime) 8%, transparent),
+    transparent 75%
+  );
+  filter: blur(66px);
+  animation: lp-glow-float-b 26s ease-in-out infinite;
+}
+
+.lp-aura-trust::before {
+  left: 50%;
+  top: 35%;
+  width: min(95vw, 46rem);
+  height: min(55vw, 26rem);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse 90% 80% at 50% 50%,
+    color-mix(in oklab, var(--lp-lime) 10%, transparent),
+    transparent 74%
+  );
+  filter: blur(80px);
+  animation: lp-glow-float-mid 24s ease-in-out infinite;
+}
+
+.lp-aura-trust::after {
+  right: -6%;
+  bottom: -4%;
+  width: min(48vw, 24rem);
+  height: min(32vw, 16rem);
+  background: radial-gradient(
+    ellipse 86% 76% at 55% 45%,
+    color-mix(in oklab, var(--lp-lime) 8%, transparent),
+    transparent 76%
+  );
+  filter: blur(68px);
+  animation: lp-glow-float-a 20s ease-in-out infinite;
+}
+
+.lp-aura-pricing::before {
+  left: 50%;
+  top: -10%;
+  width: min(70vw, 36rem);
+  height: min(55vw, 28rem);
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse 82% 72% at 50% 65%,
+    color-mix(in oklab, var(--lp-lime) 12%, transparent),
+    transparent 72%
+  );
+  filter: blur(76px);
+  animation: lp-glow-float-center 16s ease-in-out infinite;
+}
+
+.lp-aura-pricing::after {
+  left: -8%;
+  bottom: -6%;
+  width: min(58vw, 30rem);
+  height: min(38vw, 18rem);
+  background: radial-gradient(
+    ellipse 88% 78% at 28% 55%,
+    color-mix(in oklab, var(--lp-lime) 9%, transparent),
+    transparent 74%
+  );
+  filter: blur(72px);
+  animation: lp-glow-float-b 22s ease-in-out infinite;
+}
+
+/* ——— Cadres tête / pied — même radar, même atmosphère, grosse démarcation ——— */
+
+.lp-frame {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.dark .lp-frame {
+  background:
+    radial-gradient(ellipse 130% 75% at 50% 0%, color-mix(in oklab, var(--lp-lime) 9%, #0a0d08) 0%, transparent 58%),
+    linear-gradient(180deg, #080a07 0%, #0c1009 52%, #080a07 100%) !important;
+}
+
+.lp-frame .lp-glow,
+.lp-frame .lp-atmo {
+  background: transparent !important;
+}
+
+.lp-body {
+  position: relative;
+  z-index: 1;
+}
+
+.dark .lp-body {
+  background: #10140e;
+}
+
+.lp-frame-seam {
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  pointer-events: none;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  background: none !important;
+  overflow: visible;
+}
+
+.lp-frame-seam::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: color-mix(in oklab, var(--lp-lime) 58%, transparent);
+  opacity: 0.72;
+}
+
+.lp-foot-cap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: clamp(26rem, 68svh, 36rem);
+  padding: clamp(4.5rem, 9vw, 6.5rem) 0 clamp(3.5rem, 7vw, 5rem);
+  text-align: center;
+  overflow: hidden;
+}
+
+.lp-foot-cap .lp-radar {
+  --lp-radar-y: 42%;
+}
+
+.lp-foot-cta {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+.lp-foot {
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+  padding: 0 !important;
+  margin-top: 0;
+  border-top: 1px solid color-mix(in oklab, var(--lp-line) 38%, transparent);
+  background: color-mix(in oklab, var(--lp-surface) 72%, var(--lp-bg));
+}
+
+.dark .lp-foot {
+  border-top-color: color-mix(in oklab, var(--lp-line) 48%, transparent);
+  background: var(--lp-bg);
+}
+
+.dark .lp-frame-foot .lp-foot {
+  border-top-color: color-mix(in oklab, var(--lp-line) 52%, transparent);
+  background: var(--lp-bg) !important;
+}
+
+.lp-foot-rail {
+  display: none;
+}
+
+.lp-foot .lp-foot-inner.lp-page {
+  padding-top: clamp(2rem, 4vw, 2.75rem);
+  padding-bottom: clamp(1.25rem, 2.5vw, 1.75rem);
+}
+
+.lp-foot-grid {
+  display: grid;
+  gap: clamp(2rem, 4vw, 3rem);
+  align-items: start;
+}
+
+@media (min-width: 768px) {
+  .lp-foot-grid {
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.35fr);
+    gap: clamp(2.5rem, 5vw, 4rem);
+  }
+}
+
+.lp-foot-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  max-width: 20rem;
+}
+
+.lp-foot-blurb {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: color-mix(in oklab, var(--ink) 58%, transparent);
+}
+
+.dark .lp-foot-blurb {
+  color: color-mix(in oklab, var(--ink) 52%, transparent);
+}
+
+.lp-foot-theme {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid color-mix(in oklab, var(--lp-line) 42%, transparent);
+}
+
+.lp-foot-links {
+  display: grid;
+  gap: clamp(1.35rem, 2.5vw, 2rem);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (min-width: 640px) {
+  .lp-foot-links {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.lp-foot-col .legend {
+  margin-bottom: 0.75rem;
+}
+
+.lp-foot-col ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.lp-foot-col a {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: color-mix(in oklab, var(--ink) 58%, transparent);
+  transition: color 0.2s ease;
+}
+
+.lp-foot-col a:hover {
+  color: var(--lp-accent-text);
+}
+
+.lp-foot-copy {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  padding: 0.9rem clamp(1rem, 4vw, 1.5rem) max(1.1rem, env(safe-area-inset-bottom));
+  border-top: 1px solid color-mix(in oklab, var(--lp-line) 32%, transparent);
+  background: color-mix(in oklab, var(--lp-surface) 35%, transparent);
+}
+
+.dark .lp-foot-copy {
+  border-top-color: color-mix(in oklab, var(--lp-line) 22%, transparent);
+  background: color-mix(in oklab, #060806 55%, transparent);
+}
+
+.dark .lp-frame-foot .lp-foot-copy {
+  background: color-mix(in oklab, #060806 35%, transparent);
+}
+
+.lp-aura-head::before {
+  left: 50%;
+  top: -48%;
+  width: min(120vw, 62rem);
+  height: min(75vw, 38rem);
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse 78% 68% at 50% 70%,
+    color-mix(in oklab, var(--lp-lime) 14%, transparent),
+    transparent 72%
+  );
+  filter: blur(80px);
+  animation: lp-glow-float-center 21s ease-in-out infinite;
+}
+
+.lp-aura-head::after {
+  left: -8%;
+  top: 0;
+  width: min(55vw, 28rem);
+  height: min(40vw, 20rem);
+  background: radial-gradient(
+    ellipse 85% 75% at 35% 45%,
+    color-mix(in oklab, var(--lp-lime) 10%, transparent),
+    transparent 74%
+  );
+  filter: blur(72px);
+  animation: lp-glow-float-b 27s ease-in-out infinite;
+}
+
+/* Photos confiance & fonctionnalités — voile pour fondre dans la carte */
+.lp-trust-photo::after,
+.lp-feature-photo::after {
+  content: '' !important;
+  display: block !important;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--lp-bg) 14%, transparent) 0%,
+    color-mix(in oklab, var(--lp-bg) 32%, transparent) 50%,
+    color-mix(in oklab, var(--lp-bg) 52%, transparent) 100%
+  );
+}
+
+.dark .lp-trust-photo::after,
+.dark .lp-feature-photo::after {
+  background: linear-gradient(
+    128deg,
+    color-mix(in oklab, var(--lp-bg) 32%, transparent) 0%,
+    color-mix(in oklab, var(--lp-bg) 48%, transparent) 46%,
+    color-mix(in oklab, var(--lp-bg) 64%, transparent) 100%
+  );
+}
+
+.lp-trust-photo,
+.lp-feature-photo,
+.lp-section-photo,
+.lp-plan-photo-full {
+  background: transparent !important;
+}
+
+.lp-trust-photo picture,
+.lp-feature-photo picture,
+.lp-section-photo picture,
+.lp-plan-photo-full picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lp-trust-photo img,
+.lp-feature-photo img,
+.lp-section-photo img,
+.lp-plan-photo-full img {
+  opacity: 0;
+  transform: scale(1.02);
+  transition:
+    opacity 0.55s var(--ease-out-quint),
+    transform 0.55s var(--ease-out-quint);
+  transition-delay: var(--photo-d, 0.12s);
+}
+
+.lp-trust-photo img.is-ready,
+.lp-feature-photo img.is-ready,
+.lp-section-photo img.is-ready {
+  opacity: 0.72;
+  transform: none;
+}
+
+.lp-plan-photo-full img.is-ready {
+  opacity: 0.78;
+  transform: none;
+}
+
+.dark .lp-trust-photo img.is-ready,
+.dark .lp-feature-photo img.is-ready,
+.dark .lp-section-photo img.is-ready {
+  opacity: 0.62;
+}
+
+.dark .lp-plan-photo-full img.is-ready {
+  opacity: 0.68;
+}
+
+.lp-trust-photo::after,
+.lp-feature-photo::after,
+.lp-section-photo::after,
+.lp-plan-photo-full::after {
+  opacity: 0;
+  transition: opacity 0.88s var(--ease-out-quint);
+  transition-delay: var(--photo-d, 0.12s);
+}
+
+.lp-trust-photo:has(img.is-ready)::after,
+.lp-feature-photo:has(img.is-ready)::after,
+.lp-section-photo:has(img.is-ready)::after,
+.lp-plan-photo-full:has(img.is-ready)::after {
+  opacity: 1;
+}
+
+.lp-seam::before,
+.lp-seam::after,
+.lp-seam-top::before,
+.lp-foot::before {
+  content: none !important;
+  display: none !important;
+}

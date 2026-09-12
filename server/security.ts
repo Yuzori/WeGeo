@@ -41,16 +41,67 @@ export function rateLimit(max: number, windowMs: number) {
   };
 }
 
-export function securityHeaders(_req: Request, res: Response, next: NextFunction): void {
+/*
+ * `script-src` garde `unsafe-inline` parce que index.html porte un script en
+ * ligne qui pose le thème et la langue avant le premier rendu. Le retirer
+ * demande de servir index.html avec un nonce généré par requête. Le reste de
+ * la politique reste utile : plus aucun script d'une autre origine, pas
+ * d'objet embarqué, pas de mise en cadre, pas de détournement de formulaire.
+ */
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline' https://js.stripe.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  'font-src \'self\' https://fonts.gstatic.com data:',
+  // Les tuiles arrivent de `tile.openstreetmap.org`, sans sous-domaine : le
+  // joker seul ne couvrirait pas cet hôte, il faut le nommer.
+  "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://*.googleusercontent.com",
+  "connect-src 'self' https://api.stripe.com https://nominatim.openstreetmap.org",
+  'frame-src https://js.stripe.com https://hooks.stripe.com',
+  "worker-src 'self' blob:",
+].join('; ');
+
+export function securityHeaders(req: Request, res: Response, next: NextFunction): void {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  if (_req.secure || _req.headers['x-forwarded-proto'] === 'https') {
+  res.setHeader('Content-Security-Policy', CSP);
+  if (isHttpsRequest(req)) {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
   }
   next();
+}
+
+/**
+ * Les exports partent en navigation GET, donc le cookie de session suit même
+ * depuis un autre site (SameSite=Lax). Sans ce contrôle, une page tierce peut
+ * déclencher le téléchargement du fichier de prospects de l'utilisateur.
+ *
+ * `Sec-Fetch-Site` est posé par le navigateur et n'est pas falsifiable depuis
+ * une page. On retombe sur le Referer pour les navigateurs qui ne l'envoient pas.
+ */
+export function sameOriginNavigation(req: Request, res: Response, next: NextFunction): void {
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site === 'string') {
+    // `none` correspond à une saisie directe ou un favori, jamais à un site tiers.
+    if (site === 'same-origin' || site === 'none') return next();
+    res.status(403).json({ error: 'Téléchargement refusé depuis un autre site.' });
+    return;
+  }
+
+  const sourceHost = mutationSourceHost(req);
+  if (!sourceHost) return next();
+  const forwarded = req.headers['x-forwarded-host'];
+  const requestHost = (typeof forwarded === 'string' ? forwarded.split(',')[0] : req.headers.host)?.trim();
+  if (requestHost && sourceHost === requestHost) return next();
+  if (allowedOrigins().has(sourceHost)) return next();
+  res.status(403).json({ error: 'Téléchargement refusé depuis un autre site.' });
 }
 
 /**
@@ -110,10 +161,13 @@ function allowedOrigins(): Set<string> {
       /* ignore */
     }
   }
-  hosts.add('localhost:5173');
-  hosts.add('localhost:4319');
-  hosts.add('127.0.0.1:5173');
-  hosts.add('127.0.0.1:4319');
+  // Le proxy Vite n'existe qu'en développement : ne pas l'autoriser en production.
+  if (process.env.NODE_ENV !== 'production') {
+    hosts.add('localhost:5173');
+    hosts.add('localhost:4319');
+    hosts.add('127.0.0.1:5173');
+    hosts.add('127.0.0.1:4319');
+  }
   return hosts;
 }
 
@@ -129,8 +183,20 @@ export function isHttpsRequest(req: Request): boolean {
 }
 
 export function assertRuntimeSecrets(): void {
-  if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET?.trim()) {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const secret = process.env.SESSION_SECRET?.trim() ?? '';
+  if (!secret) {
     console.error('SESSION_SECRET manquant : refus de démarrer en production.');
     process.exit(1);
+  }
+  // Le secret sert de poivre aux jetons de session et aux codes e-mail. Une
+  // valeur courte ou recopiée depuis .env.example ne protège rien.
+  if (secret.length < 32 || secret === 'changez-moi-en-production') {
+    console.error('SESSION_SECRET trop faible : au moins 32 caractères aléatoires sont requis.');
+    process.exit(1);
+  }
+  if (process.env.DEV_ACCOUNT_EMAILS?.trim()) {
+    console.warn('DEV_ACCOUNT_EMAILS est ignoré en production : les accès de développement y sont désactivés.');
   }
 }

@@ -1,14 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FolderKanban, Mail, Plus, Users } from 'lucide-react';
+import { FolderKanban, Mail, Pencil, Plus, Users } from 'lucide-react';
 import type { Workspace, WorkspaceInvite } from '../../shared/types';
 import { api } from '../api';
 import { useAuth } from '../auth';
 import { LogoutButton } from '../components/LogoutButton';
 import { BrandMark } from '../components/BrandMark';
+import { SessionCustomizeModal, sessionCoverBackground } from '../components/SessionCustomizeModal';
 import { SettingsLink } from '../components/SettingsLink';
 import { UserAvatar } from '../components/UserAvatar';
-import { Button } from '../components/ui';
+import { Button, cx } from '../components/ui';
 import { sessionPath } from '../workspace';
 
 export function SessionsPage() {
@@ -22,6 +23,7 @@ export function SessionsPage() {
   const [creating, setCreating] = useState(false);
   const [google, setGoogle] = useState(true);
   const [mail, setMail] = useState(true);
+  const [customize, setCustomize] = useState<Workspace | null>(null);
 
   const refresh = () => {
     api
@@ -47,7 +49,18 @@ export function SessionsPage() {
       .catch(() => {});
     const onInvites = () => refresh();
     window.addEventListener('prospy:invites-changed', onInvites);
-    return () => window.removeEventListener('prospy:invites-changed', onInvites);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, 12000);
+    return () => {
+      window.removeEventListener('prospy:invites-changed', onInvites);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
   }, []);
 
   const create = async (event: FormEvent) => {
@@ -150,47 +163,79 @@ export function SessionsPage() {
           <p className="text-sm text-faint">Chargement des sessions…</p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            {workspaces.map((workspace) => (
-              <Link
+            {workspaces.map((workspace) => {
+              const cover = sessionCoverBackground(workspace.coverStyle);
+              return (
+              <article
                 key={workspace.id}
-                to={sessionPath(workspace.id)}
-                className="sheet group flex flex-col gap-3 p-4 transition hover:-translate-y-0.5 hover:border-lime-line"
+                className={cx('session-card sheet overflow-hidden p-0 transition', cover && 'has-cover')}
+                style={cover ? ({ '--session-cover': cover } as CSSProperties) : undefined}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="inline-flex size-9 items-center justify-center rounded-full border border-rule bg-card-2 text-lime-deep">
-                    {workspace.personal ? <FolderKanban className="size-4" /> : <Users className="size-4" />}
-                  </span>
-                  <span className="legend">
+                <div className="session-card-cover" aria-hidden />
+                <div className="session-card-toolbar">
+                  <Link to={sessionPath(workspace.id)} className="session-card-logo group/logo" aria-hidden>
+                    {workspace.logoUrl ? (
+                      <img src={workspace.logoUrl} alt="" className="size-full object-cover" />
+                    ) : workspace.personal ? (
+                      <FolderKanban className="size-4" />
+                    ) : (
+                      <Users className="size-4" />
+                    )}
+                  </Link>
+                  <span className="session-card-badge legend">
                     {workspace.personal ? 'personnel' : `${workspace.memberCount} personne${workspace.memberCount > 1 ? 's' : ''}`}
                   </span>
+                  <div className="session-card-actions">
+                    {workspace.role === 'owner' && (
+                      <button
+                        type="button"
+                        className="session-card-edit"
+                        onClick={() => setCustomize(workspace)}
+                        aria-label="Personnaliser la session"
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                    )}
+                    {!workspace.personal && (
+                      <button
+                        type="button"
+                        className="session-card-danger"
+                        onClick={() => {
+                          const run =
+                            workspace.role === 'owner'
+                              ? api.deleteWorkspace(workspace.id)
+                              : api.leaveWorkspace(workspace.id);
+                          void run.then(refresh).catch((err: Error) => setError(err.message));
+                        }}
+                      >
+                        {workspace.role === 'owner' ? 'Supprimer' : 'Quitter'}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div>
+                <Link to={sessionPath(workspace.id)} className="session-card-body group">
                   <h2 className="text-lg font-semibold tracking-tight group-hover:text-lime-deep">{workspace.name}</h2>
                   <p className="legend mt-1">
                     {workspace.leadCount} fiche{workspace.leadCount > 1 ? 's' : ''} · {workspace.searchCount} relevé
                     {workspace.searchCount > 1 ? 's' : ''}
                   </p>
-                </div>
-                {!workspace.personal && (
-                  <button
-                    type="button"
-                    className="self-start text-[11px] font-medium text-muted hover:text-score-low"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const run =
-                        workspace.role === 'owner'
-                          ? api.deleteWorkspace(workspace.id)
-                          : api.leaveWorkspace(workspace.id);
-                      void run.then(refresh).catch((err: Error) => setError(err.message));
-                    }}
-                  >
-                    {workspace.role === 'owner' ? 'Supprimer' : 'Quitter'}
-                  </button>
-                )}
-              </Link>
-            ))}
+                </Link>
+              </article>
+            );
+            })}
           </div>
+        )}
+
+        {customize && (
+          <SessionCustomizeModal
+            workspace={customize}
+            open
+            onClose={() => setCustomize(null)}
+            onSaved={(next) => {
+              setWorkspaces((rows) => rows.map((row) => (row.id === next.id ? next : row)));
+              setCustomize(null);
+            }}
+          />
         )}
 
         {(!google || !mail) && (

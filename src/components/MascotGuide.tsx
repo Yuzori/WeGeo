@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useI18n } from '../i18n';
 
 export const GUIDE_STORAGE_KEY = 'prospy.guide.v3';
+
+export function guideStorageKey(userId: number): string {
+  return `${GUIDE_STORAGE_KEY}.${userId}`;
+}
 export const GUIDE_STEPS = ['logo', 'search', 'launch', 'results', 'pipeline', 'invite'] as const;
 export type GuideStep = (typeof GUIDE_STEPS)[number];
 
@@ -18,16 +21,7 @@ function visibleSlot(step: GuideStep): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[data-guide="${step}"]`);
 }
 
-export function MascotGuide({
-  step,
-  onNext,
-  onSkip,
-}: {
-  step: GuideStep | null;
-  onNext: () => void;
-  onSkip: () => void;
-}) {
-  const { m } = useI18n();
+export function MascotGuide({ step }: { step: GuideStep | null }) {
   const [hole, setHole] = useState<DOMRect | null>(null);
 
   useEffect(() => {
@@ -62,11 +56,10 @@ export function MascotGuide({
 
   if (!step) return null;
 
-  const last = step === 'invite';
   const radius = step === 'logo' ? 999 : 18;
 
   return (
-    <div className="app-guide" role="dialog" aria-modal="true" aria-label={m.guide.steps[step]}>
+    <div className="app-guide" role="presentation" aria-hidden>
       <div className="app-guide-veil" />
       {hole && (
         <div
@@ -80,17 +73,6 @@ export function MascotGuide({
           }}
         />
       )}
-      <div className="app-guide-dock">
-        <p className="app-guide-line">{m.guide.steps[step]}</p>
-        <div className="app-guide-actions">
-          <button type="button" className="app-guide-skip" onClick={onSkip}>
-            {m.guide.skip}
-          </button>
-          <button type="button" className="app-guide-next" onClick={onNext}>
-            {last ? m.guide.done : m.guide.next}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

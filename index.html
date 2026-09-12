@@ -6,7 +6,9 @@
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png?v=2" />
     <link rel="icon" type="image/png" href="/apple-touch-icon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preload" href="/prospy.fbx?full=1" as="fetch" crossorigin />
+    <link rel="preload" href="/model-optimized.glb" as="fetch" crossorigin />
+    <link rel="preload" href="/draco/draco_wasm_wrapper.js" as="script" />
+    <link rel="preload" href="/draco/draco_decoder.wasm" as="fetch" crossorigin />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -14,12 +16,12 @@
       href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <title>Prospy. Trouvez les commerces sans site web</title>
+    <title>Prospy. La prospection à son paroxysme</title>
     <meta
       name="description"
-      content="Prospy parcourt Google Maps, isole les entreprises locales sans vrai site web, et les range dans un pipeline d’appels jusqu’à la signature."
+      content="Prospy ouvre les fiches Google Maps, écarte les commerces qui ont déjà un site, et vous rend une liste d’appels classée."
     />
-    <meta property="og:title" content="Prospy. Trouvez les commerces sans site web" />
+    <meta property="og:title" content="Prospy. La prospection à son paroxysme" />
     <meta
       property="og:description"
       content="Relevé local, pipeline d’appels, carte et export. Les paiements passent par Stripe."
@@ -28,11 +30,11 @@
     <meta property="og:locale" content="fr_FR" />
     <meta name="twitter:card" content="summary_large_image" />
     <style>
-      html.is-boot .lp-nav-wrap,
       html.is-boot .lp-hero-copy .lp-chip,
       html.is-boot .lp-hero-title .lp-glyph,
       html.is-boot .lp-hero-lead,
       html.is-boot .lp-hero-ctas,
+      html.is-boot .lp-proof,
       html.is-boot .lp-hero-mocks,
       html.is-boot .lp-hero-stage .lp-radar {
         opacity: 0;

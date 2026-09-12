@@ -8,7 +8,7 @@ import { BrandMark } from '../components/BrandMark';
 import { LangSwitch } from '../components/LangSwitch';
 import { cx } from '../components/ui';
 import { useI18n } from '../i18n';
-import { resizeAvatar } from '../lib/avatar';
+import { AvatarCropModal } from '../components/AvatarCropModal';
 import { markAppEnter } from '../lib/nav';
 
 function GoogleMark() {
@@ -112,6 +112,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
   const [loading, setLoading] = useState(false);
   const [google, setGoogle] = useState(false);
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
 
   const strengthLabels: [string, string, string, string] = [
     m.auth.strengthWeak,
@@ -152,7 +153,8 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
     setLoading(true);
     try {
       if (mode === 'forgot') {
-        await api.forgot(email, locale);
+        const result = await api.forgot(identifier, locale);
+        if (result.email) setEmail(result.email);
         setPurpose('reset');
         setStep('code');
         setInfo(m.auth.forgotSent);
@@ -243,7 +245,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
 
         {step === 'form' ? (
           <form onSubmit={(e) => void submitForm(e)} className={cx('glass space-y-3 rounded-[10px] p-5', !(google && mode !== 'forgot') && 'mt-8')}>
-            {mode === 'login' ? (
+            {mode === 'login' || mode === 'forgot' ? (
               <label className="block">
                 <span className="legend mb-1.5 block">{m.auth.identifier}</span>
                 <input
@@ -298,10 +300,7 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
                           onChange={(event) => {
                             const file = event.target.files?.[0];
                             event.target.value = '';
-                            if (!file) return;
-                            void resizeAvatar(file)
-                              .then(setAvatar)
-                              .catch((err: Error) => setError(err.message));
+                            if (file) setCropFile(file);
                           }}
                         />
                       </label>
@@ -430,6 +429,21 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' }) {
           </p>
         )}
       </div>
+
+      <AvatarCropModal
+        file={cropFile}
+        open={cropFile != null}
+        title={m.settings.cropTitle}
+        hint={m.settings.cropHint}
+        zoomLabel={m.settings.cropZoom}
+        cancelLabel={m.settings.cropCancel}
+        applyLabel={m.settings.cropApply}
+        onClose={() => setCropFile(null)}
+        onConfirm={(data) => {
+          setCropFile(null);
+          setAvatar(data);
+        }}
+      />
     </div>
   );
 }

@@ -294,3 +294,72 @@ export async function sendInviteEmail(params: {
   const text = `${intro}\n\n${copy.inviteHint}\n${href}`;
   await deliver(params.to, subject, text, html, `invite → ${params.to}  ${params.workspaceName}`);
 }
+
+const PLAN_LABELS: Record<string, { fr: string; en: string }> = {
+  starter: { fr: 'Starter', en: 'Starter' },
+  pro: { fr: 'Pro', en: 'Pro' },
+  agence: { fr: 'Agence', en: 'Agency' },
+};
+
+export async function sendSubscriptionEmail(params: {
+  to: string;
+  planName: string;
+  planId?: string | null;
+  locale?: string;
+}): Promise<void> {
+  const lang = params.locale === 'en' ? 'en' : 'fr';
+  const copy = COPY[lang];
+  const planLabel = params.planName || PLAN_LABELS[params.planId ?? '']?.[lang] || 'Prospy';
+  const subject =
+    lang === 'en' ? `Your ${planLabel} subscription is active` : `Votre abonnement ${planLabel} est actif`;
+  const intro =
+    lang === 'en'
+      ? `Thank you — your ${planLabel} subscription is now active. You can launch map searches and manage your pipeline right away.`
+      : `Merci — votre abonnement ${planLabel} est maintenant actif. Vous pouvez lancer vos relevés Maps et gérer votre pipeline.`;
+  const href = `${appUrl()}/app`;
+  const inner = `
+    <p style="margin:0 0 20px;font-size:16px;line-height:1.55;color:#59604c">${escapeHtml(intro)}</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 22px">
+      <tr>
+        <td style="background:#f3f0e6;border:1px solid #dcd5c1;border-radius:12px;padding:16px 18px">
+          <p style="margin:0 0 4px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#8b937c">${lang === 'en' ? 'Plan' : 'Offre'}</p>
+          <p style="margin:0;font-size:20px;line-height:1.3;font-weight:700;color:#13170f">${escapeHtml(planLabel)}</p>
+        </td>
+      </tr>
+    </table>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px">
+      <tr>
+        <td style="background:#c6f042;border-radius:999px">
+          <a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;font-weight:700;color:#13170f;text-decoration:none">${escapeHtml(copy.cta)}</a>
+        </td>
+      </tr>
+    </table>
+    <p style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;line-height:1.55;color:#8b937c">${lang === 'en' ? 'Manage billing anytime from your account settings.' : 'Gérez la facturation à tout moment depuis les paramètres du compte.'}</p>
+  `;
+  const html = layout({
+    preheader: intro,
+    kicker: lang === 'en' ? 'Subscription' : 'Abonnement',
+    title: lang === 'en' ? 'Welcome aboard' : 'Bienvenue',
+    inner,
+    footer: copy.footer,
+  });
+  const text = `${intro}\n\n${href}`;
+  await deliver(params.to, subject, text, html, `subscription → ${params.to}  ${planLabel}`);
+
+  const notify = process.env.SUBSCRIPTION_NOTIFY_EMAIL?.trim();
+  if (notify && notify.toLowerCase() !== params.to.toLowerCase()) {
+    const adminSubject = lang === 'en' ? `New subscription: ${planLabel}` : `Nouvel abonnement : ${planLabel}`;
+    const adminIntro =
+      lang === 'en'
+        ? `${params.to} just subscribed to ${planLabel}.`
+        : `${params.to} vient de souscrire à ${planLabel}.`;
+    const adminHtml = layout({
+      preheader: adminIntro,
+      kicker: 'Prospy',
+      title: adminSubject,
+      inner: `<p style="margin:0;font-size:16px;line-height:1.55;color:#59604c">${escapeHtml(adminIntro)}</p>`,
+      footer: copy.footer,
+    });
+    await deliver(notify, adminSubject, adminIntro, adminHtml, `subscription-notify → ${notify}  ${params.to}`);
+  }
+}

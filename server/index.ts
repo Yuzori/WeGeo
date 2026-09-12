@@ -8,15 +8,18 @@ import type { PlanLimits } from '../shared/plans.ts';
 import * as db from './db.ts';
 import * as auth from './auth.ts';
 import * as billing from './billing.ts';
+import * as analytics from './analytics.ts';
 import * as workspaces from './workspaces.ts';
-import { readAvatar } from './avatars.ts';
+import { locateRequest } from './locate.ts';
+import { updateUserGeo } from './db.ts';
+import { readAvatar, readRecentAvatar } from './avatars.ts';
+import { normalizeLogoMode, readPreviousWorkspaceLogo, readWorkspaceLogo } from './workspace-logos.ts';
 import { safeFileName, toCsv, toRows, toTsv, toXlsx } from './export.ts';
 import { createGoogleSheet, googleAccessToken } from './google.ts';
 import { activeRunIds, cancelRun, getRun, resumeSearch, startSearch } from './search-runner.ts';
 import { closeBrowser, warmUp } from './scraper/maps.ts';
 import { geocodeCity } from './scraper/geo.ts';
-import { locateRequest } from './locate.ts';
-import { assertRuntimeSecrets, rateLimit, sameOriginMutations, securityHeaders } from './security.ts';
+import { assertRuntimeSecrets, rateLimit, sameOriginMutations, sameOriginNavigation, securityHeaders } from './security.ts';
 
 const PORT = Number(process.env.PORT ?? 4319);
 const app = express();
@@ -56,6 +59,14 @@ function parseId(raw: string | string[] | undefined): number | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function touchUserGeo(req: Request, userId: number): void {
+  void locateRequest(req)
+    .then((geo) => {
+      if (geo) updateUserGeo(userId, geo);
+    })
+    .catch(() => {});
 }
 
 function parseOptions(raw: unknown, limits: PlanLimits): SearchOptions {
@@ -118,6 +129,7 @@ api.post('/auth/login', rateLimit(12, 15 * 60 * 1000), async (req, res) => {
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   if ('user' in result) {
     auth.attachSession(req, res, result.token);
+    touchUserGeo(req, result.user.id);
     return res.json({ user: auth.toPublicUser(result.user) });
   }
   res.json(result);
@@ -131,6 +143,7 @@ api.post('/auth/verify', rateLimit(20, 15 * 60 * 1000), async (req, res) => {
   );
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   auth.attachSession(req, res, result.token);
+  touchUserGeo(req, result.user.id);
   res.json({ user: auth.toPublicUser(result.user) });
 });
 
@@ -145,7 +158,10 @@ api.post('/auth/resend', rateLimit(6, 15 * 60 * 1000), async (req, res) => {
 });
 
 api.post('/auth/forgot', rateLimit(6, 60 * 60 * 1000), async (req, res) => {
-  const result = await auth.forgot(String(req.body?.email ?? ''), String(req.body?.locale ?? 'fr'));
+  const result = await auth.forgot(
+    String(req.body?.identifier ?? req.body?.email ?? ''),
+    String(req.body?.locale ?? 'fr'),
+  );
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.json(result);
 });
@@ -158,6 +174,7 @@ api.post('/auth/reset', rateLimit(10, 15 * 60 * 1000), async (req, res) => {
   );
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   auth.attachSession(req, res, result.token);
+  touchUserGeo(req, result.user.id);
   res.json({ user: auth.toPublicUser(result.user) });
 });
 
@@ -185,7 +202,8 @@ api.patch('/auth/profile', auth.requireUser, rateLimit(20, 15 * 60 * 1000), asyn
     password: typeof req.body?.password === 'string' ? req.body.password : undefined,
     currentPassword: typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : undefined,
     avatar: req.body?.avatar === null ? null : typeof req.body?.avatar === 'string' ? req.body.avatar : undefined,
-  });
+    avatarRecent: req.body?.avatarRecent != null ? Number(req.body.avatarRecent) : undefined,
+  }, req);
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.json({ user: auth.toPublicUser(result.user) });
 });
@@ -198,6 +216,20 @@ api.post('/auth/username', auth.requireUser, rateLimit(20, 15 * 60 * 1000), (req
 
 api.get('/auth/stats', auth.requireUser, (_req, res) => {
   res.json(auth.accountStats(auth.currentUser(res).id));
+});
+
+api.get('/avatars/:id/recent/:name', auth.requireUser, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) return res.status(404).end();
+  const me = auth.currentUser(res);
+  if (id !== me.id) return res.status(404).end();
+  const name = String(req.params.name ?? '');
+  const file = readRecentAvatar(id, decodeURIComponent(name));
+  if (!file) return res.status(404).end();
+  const types = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' } as const;
+  res.setHeader('Content-Type', types[file.kind]);
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.end(file.buffer);
 });
 
 api.get('/avatars/:id', auth.requireUser, (req, res) => {
@@ -268,10 +300,40 @@ api.get('/workspaces/:id', auth.requireUser, (req, res) => {
   res.json({ workspace });
 });
 
+api.get('/workspace-logos/:id/previous', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).end();
+  const user = auth.currentUser(res);
+  if (!workspaces.getForUser(id, user)) return res.status(404).end();
+  const buf = readPreviousWorkspaceLogo(id);
+  if (!buf) return res.status(404).end();
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.send(buf);
+});
+
+api.get('/workspace-logos/:id', auth.requireUser, (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).end();
+  const user = auth.currentUser(res);
+  if (!workspaces.getForUser(id, user)) return res.status(404).end();
+  const buf = readWorkspaceLogo(id);
+  if (!buf) return res.status(404).end();
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.send(buf);
+});
+
 api.patch('/workspaces/:id', auth.requireUser, (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
-  const result = workspaces.renameWorkspace(id, auth.currentUser(res), String(req.body?.name ?? ''));
+  const body = req.body ?? {};
+  const result = workspaces.updateWorkspace(id, auth.currentUser(res), {
+    name: body.name != null ? String(body.name) : undefined,
+    logo: body.logo === null ? null : body.logo != null ? String(body.logo) : undefined,
+    logoMode: body.logoMode != null ? (normalizeLogoMode(body.logoMode) ?? undefined) : undefined,
+    coverStyle: body.coverStyle === null ? null : body.coverStyle != null ? String(body.coverStyle) : undefined,
+  });
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.json({ workspace: result });
 });
@@ -322,7 +384,8 @@ api.get('/billing/config', (_req, res) => {
 
 api.post('/billing/checkout', auth.requireUser, rateLimit(10, 60 * 1000), async (req, res) => {
   const user = auth.currentUser(res);
-  const result = await billing.createEmbeddedCheckout(user, String(req.body?.plan ?? ''), req);
+  const interval = req.body?.interval === 'year' ? 'year' : 'month';
+  const result = await billing.createSubscriptionPayment(user, String(req.body?.plan ?? ''), interval, req);
   if ('error' in result) return res.status(result.status).json({ error: result.error });
   res.json(result);
 });
@@ -333,13 +396,87 @@ api.post('/billing/portal', auth.requireUser, rateLimit(10, 60 * 1000), async (r
   res.json(result);
 });
 
+api.post('/billing/cancel', auth.requireUser, rateLimit(6, 60 * 1000), async (_req, res) => {
+  const result = await billing.cancelSubscription(auth.currentUser(res));
+  if ('error' in result) return res.status(result.status).json({ error: result.error });
+  res.json(result);
+});
+
 api.post('/billing/confirm', auth.requireUser, rateLimit(20, 60 * 1000), async (req, res) => {
+  const user = auth.currentUser(res);
   const sessionId = String(req.body?.sessionId ?? '');
-  await billing.confirmCheckoutSession(auth.currentUser(res), sessionId);
-  res.json({ user: auth.toPublicUser(auth.currentUser(res)) });
+  const paymentIntentId = String(req.body?.paymentIntentId ?? '');
+  if (paymentIntentId) {
+    const result = await billing.confirmPaymentIntent(user, paymentIntentId);
+    if ('error' in result) return res.status(result.status).json({ error: result.error });
+  } else if (sessionId) {
+    await billing.confirmCheckoutSession(user, sessionId);
+  }
+  const fresh = auth.findUserById(user.id) ?? user;
+  if (!auth.userHasAccess(fresh)) {
+    return res.status(409).json({ error: 'Paiement reçu, activation en cours. Réessayez dans quelques secondes.' });
+  }
+  res.json({ user: auth.toPublicUser(fresh) });
+});
+
+/* --------------------------------------------------------------- analytics */
+
+api.post('/analytics/event', rateLimit(120, 60 * 1000), async (req, res) => {
+  await analytics.recordEventFromRequest(req, {
+    visitorId: String(req.body?.visitorId ?? ''),
+    event: String(req.body?.event ?? ''),
+    path: typeof req.body?.path === 'string' ? req.body.path : undefined,
+    meta:
+      req.body?.meta && typeof req.body.meta === 'object' && !Array.isArray(req.body.meta)
+        ? Object.fromEntries(
+            Object.entries(req.body.meta as Record<string, unknown>)
+              .slice(0, 8)
+              .map(([key, value]) => [key, String(value).slice(0, 120)]),
+          )
+        : undefined,
+  });
+  res.json({ ok: true });
+});
+
+api.post('/prospy/stats/login', rateLimit(8, 15 * 60 * 1000), (req, res) => {
+  const password = String(req.body?.password ?? '');
+  if (!analytics.verifyStatsPassword(password)) {
+    return res.status(401).json({ error: 'Mot de passe incorrect.' });
+  }
+  analytics.setStatsCookie(res);
+  res.json({ ok: true });
+});
+
+api.post('/prospy/stats/logout', (_req, res) => {
+  analytics.clearStatsCookie(res);
+  res.json({ ok: true });
+});
+
+api.get('/prospy/stats', analytics.requireStats, (_req, res) => {
+  res.json(analytics.siteStats());
+});
+
+api.post('/prospy/stats/reset', analytics.requireStats, (_req, res) => {
+  res.json(analytics.resetAnalytics());
 });
 
 /* ------------------------------------------------------------- recherches */
+
+/**
+ * Le scraper lance un Chromium par relevé : la capacité reste plafonnée.
+ * La limite était globale, si bien qu'un seul compte bloquait tous les autres.
+ * Elle est maintenant d'un relevé par session de travail, sous un plafond
+ * global qui protège la machine.
+ */
+const MAX_RUNS = Math.max(1, Number(process.env.WEGEO_MAX_CONCURRENT_SEARCHES ?? 2));
+
+function searchSlotError(workspaceId: number): string | null {
+  const running = activeRunIds();
+  const mine = running.filter((id) => db.getSearch(id)?.workspaceId === workspaceId).length;
+  if (mine >= 1) return 'Une recherche est déjà en cours dans cette session. Attendez la fin ou arrêtez-la.';
+  if (running.length >= MAX_RUNS) return 'Tous les relevés sont occupés pour le moment. Réessayez dans une minute.';
+  return null;
+}
 
 api.post('/searches', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, rateLimit(8, 60 * 1000), (req: Request, res: Response) => {
   const user = auth.currentUser(res);
@@ -356,9 +493,8 @@ api.post('/searches', auth.requireUser, workspaces.requireWorkspace, auth.requir
 
   if (!city) return res.status(400).json({ error: 'La ville est obligatoire.' });
   if (!domains.length) return res.status(400).json({ error: 'Indiquez au moins un métier à rechercher.' });
-  if (activeRunIds().length >= 1) {
-    return res.status(409).json({ error: 'Une recherche est déjà en cours. Attendez la fin ou arrêtez-la.' });
-  }
+  const busy = searchSlotError(workspaces.currentWorkspaceId(res));
+  if (busy) return res.status(409).json({ error: busy });
 
   const searchId = startSearch({ city, domains, options: parseOptions(req.body?.options, limits) }, workspaces.currentWorkspaceId(res), user.id);
   res.status(201).json({ searchId });
@@ -405,9 +541,8 @@ api.post('/searches/:id/cancel', auth.requireUser, workspaces.requireWorkspace, 
 
 /** Repart d'une recherche arrêtée, en sautant les métiers déjà parcourus. */
 api.post('/searches/:id/resume', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, (req: Request, res: Response) => {
-  if (activeRunIds().length >= 1) {
-    return res.status(409).json({ error: 'Une recherche est déjà en cours. Attendez la fin ou arrêtez-la.' });
-  }
+  const busy = searchSlotError(workspaces.currentWorkspaceId(res));
+  if (busy) return res.status(409).json({ error: busy });
 
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Identifiant invalide.' });
@@ -537,7 +672,7 @@ api.get('/geocode', auth.requireUser, auth.requirePaid, rateLimit(30, 60 * 1000)
 
 /* ------------------------------------------------------------------ exports */
 
-api.get('/export/:format', auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, async (req: Request, res: Response) => {
+api.get('/export/:format', sameOriginNavigation, auth.requireUser, workspaces.requireWorkspace, auth.requirePaid, async (req: Request, res: Response) => {
   const format = req.params.format;
   const leads = db.listLeads(parseFilters(req, workspaces.currentWorkspaceId(res)));
   const label = typeof req.query.status === 'string' ? req.query.status.slice(0, 40) : 'prospects';
@@ -612,6 +747,7 @@ if (existsSync(webDist)) {
 assertRuntimeSecrets();
 
 const server = app.listen(PORT, () => {
+  analytics.warnIfEphemeralDatabase();
   console.log(`Prospy API prête sur http://localhost:${PORT}`);
   if (process.env.NODE_ENV !== 'production') {
     console.log('Interface à jour en local : http://localhost:5173  (npm run dev)');

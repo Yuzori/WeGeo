@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
@@ -15,14 +15,19 @@ import {
   Phone,
   Radar,
   Shield,
+  ShieldCheck,
+  Sparkles,
   Star,
   Table2,
-  UserRound,
+  Target,
+  TrendingUp,
   X,
+  Zap,
 } from 'lucide-react';
 import type { BillingPlan, Lead } from '../../shared/types';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { trackPricingView } from '../lib/analytics';
 import { GeoMap } from '../components/GeoMap';
 import { LangSwitch } from '../components/LangSwitch';
 import { LogoFlight } from '../components/LogoFlight';
@@ -30,7 +35,7 @@ import { SettingsLink } from '../components/SettingsLink';
 import { UserAvatar } from '../components/UserAvatar';
 import { ThemeToggle, cx } from '../components/ui';
 import { useI18n, type Locale } from '../i18n';
-import { TIER_COLORS, hueOf, initials, potential } from '../lib/lead';
+import { TIER_COLORS } from '../lib/lead';
 import { relocateLeads, useVisitorPlace } from '../lib/place';
 
 const FALLBACK_PLANS: BillingPlan[] = [
@@ -38,7 +43,10 @@ const FALLBACK_PLANS: BillingPlan[] = [
     id: 'starter',
     name: 'Starter',
     tagline: 'Pour lancer les premières tournées.',
-    amountLabel: '19 €',
+    amountLabel: '29 €',
+    annualAmountLabel: '290 €',
+    annualWasLabel: '348 €',
+    annualBadge: '-17 % · 2 mois offerts',
     interval: 'month',
     cta: 'Choisir Starter',
     priceConfigured: false,
@@ -61,7 +69,10 @@ const FALLBACK_PLANS: BillingPlan[] = [
     id: 'pro',
     name: 'Pro',
     tagline: 'Pour appeler et conclure au quotidien.',
-    amountLabel: '49 €',
+    amountLabel: '59 €',
+    annualAmountLabel: '590 €',
+    annualWasLabel: '708 €',
+    annualBadge: '-17 % · 2 mois offerts',
     interval: 'month',
     highlighted: true,
     cta: 'Choisir Pro',
@@ -84,8 +95,11 @@ const FALLBACK_PLANS: BillingPlan[] = [
   {
     id: 'agence',
     name: 'Agence',
-    tagline: 'Pour enchaîner les villes et les métiers.',
-    amountLabel: '89 €',
+    tagline: 'Pour les équipes qui enchaînent villes et métiers.',
+    amountLabel: '119 €',
+    annualAmountLabel: '1 119 €',
+    annualWasLabel: '1 428 €',
+    annualBadge: '-17 % · 2 mois offerts',
     interval: 'month',
     cta: 'Choisir Agence',
     priceConfigured: false,
@@ -135,87 +149,179 @@ const RADAR_RINGS = [
   { r: 96, o: 0.04 },
 ];
 
-function photoCandidates(name: string): string[] {
+const LANDING_PHOTOS_ENABLED = true;
+
+function photoSets(name: string): Array<{ webp: string; img: string }> {
   const folders = ['', 'landing/'];
-  const exts = ['jpg', 'jpeg', 'png', 'webp'];
-  return folders.flatMap((folder) => exts.map((ext) => `/${folder}${name}.${ext}`));
+  const sets: Array<{ webp: string; img: string }> = [];
+  for (const folder of folders) {
+    for (const ext of ['jpg', 'jpeg', 'png'] as const) {
+      sets.push({ webp: `/${folder}${name}.webp`, img: `/${folder}${name}.${ext}` });
+    }
+  }
+  return sets;
 }
 
-function PhotoSlot({ name, className = 'lp-feature-photo' }: { name: string; className?: string }) {
-  const [src, setSrc] = useState<string | null>(null);
+function PhotoSlot({
+  name,
+  className = 'lp-feature-photo',
+  delay = '0.12s',
+}: {
+  name: string;
+  className?: string;
+  delay?: string;
+}) {
+  const sets = useMemo(() => photoSets(name), [name]);
+  const [setIndex, setSetIndex] = useState(0);
+  const current = sets[setIndex] ?? null;
+  const [loaded, setLoaded] = useState(false);
+  const [inView, setInView] = useState(false);
   const [ready, setReady] = useState(false);
-  const tryAt = useRef(0);
-  const host = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const node = host.current;
-    if (!node) return;
-    tryAt.current = 0;
-    setSrc(null);
+    setSetIndex(0);
+    setLoaded(false);
+    setInView(false);
     setReady(false);
-    const list = photoCandidates(name);
+  }, [name]);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
     const io = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry?.isIntersecting) return;
-        setSrc(list[0] ?? null);
-        io.disconnect();
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          setInView(true);
+          io.unobserve(entry.target);
+        }
       },
-      { rootMargin: '140px' },
+      { threshold: [0, 0.06, 0.12], rootMargin: '60px 0px 100px 0px' },
     );
+
     io.observe(node);
     return () => io.disconnect();
   }, [name]);
 
+  useEffect(() => {
+    if (!loaded || !inView || ready) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setReady(true));
+    });
+  }, [loaded, inView, ready]);
+
+  useEffect(() => {
+    const img = ref.current?.querySelector('img');
+    if (img?.complete && img.naturalWidth > 0) setLoaded(true);
+  }, [current?.img, setIndex]);
+
+  if (!LANDING_PHOTOS_ENABLED) return null;
+
   return (
-    <div ref={host} className={cx(className, !ready && 'is-empty')} aria-hidden>
-      {src ? (
-        <img
-          src={src}
-          alt=""
-          width={1200}
-          height={800}
-          loading="lazy"
-          decoding="async"
-          onLoad={() => setReady(true)}
-          onError={() => {
-            const list = photoCandidates(name);
-            tryAt.current += 1;
-            const next = list[tryAt.current];
-            if (next) setSrc(next);
-            else {
-              setSrc(null);
-              setReady(false);
-            }
-          }}
-        />
+    <div
+      ref={ref}
+      className={className}
+      style={{ '--photo-d': delay } as CSSProperties}
+      aria-hidden
+    >
+      {current ? (
+        <picture>
+          <source srcSet={current.webp} type="image/webp" />
+          <img
+            src={current.img}
+            alt=""
+            width={1200}
+            height={800}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+            className={ready ? 'is-ready' : undefined}
+            onLoad={() => setLoaded(true)}
+            onError={() => {
+              setSetIndex((index) => {
+                const next = index + 1;
+                if (next < sets.length) {
+                  setLoaded(false);
+                  setReady(false);
+                  return next;
+                }
+                return index;
+              });
+            }}
+          />
+        </picture>
       ) : null}
-      {ready ? null : (
-        <span className="lp-photo-wait">
-          <span className="lp-photo-x" />
-          <span className="lp-photo-file">{name}.jpg</span>
-        </span>
-      )}
     </div>
   );
 }
 
 function useReveal(locale: Locale) {
   useEffect(() => {
-    const nodes = document.querySelectorAll<HTMLElement>('.lp-reveal:not(.is-in)');
-    if (!nodes.length) return;
+    const pending = () =>
+      document.querySelectorAll<HTMLElement>('.lp-reveal:not(.is-in), .lp-reveal-head:not(.is-in)');
+
+    const reveal = (node: HTMLElement) => {
+      if (node.classList.contains('is-in')) return;
+      node.classList.add('is-in');
+    };
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      pending().forEach(reveal);
+      return;
+    }
+
     const io = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
-          entry.target.classList.add('is-in');
+          reveal(entry.target as HTMLElement);
           io.unobserve(entry.target);
         }
       },
-      { threshold: 0.14, rootMargin: '0px 0px -6% 0px' },
+      { threshold: 0.06, rootMargin: '0px 0px -4% 0px' },
     );
-    nodes.forEach((node) => io.observe(node));
+
+    const vh = window.innerHeight;
+    pending().forEach((node) => {
+      const rect = node.getBoundingClientRect();
+      if (rect.top < vh * 0.94 && rect.bottom > 0) reveal(node);
+      else io.observe(node);
+    });
+
     return () => io.disconnect();
   }, [locale]);
+}
+
+const TRAIT_ICONS = {
+  zap: Zap,
+  shield: ShieldCheck,
+  target: Target,
+  spark: Sparkles,
+} as const;
+
+function HeroTopoLines() {
+  return (
+    <svg className="lp-hero-topo" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden>
+      <path d="M-20 310 C140 170, 310 260, 470 190 S740 70, 910 210 S1080 360, 1240 250" />
+      <path d="M40 430 C180 320, 280 490, 430 410 S680 250, 830 430 S1020 560, 1200 420" />
+      <path d="M-40 540 C90 470, 230 610, 390 530 S620 390, 790 560 S1010 680, 1220 540" />
+    </svg>
+  );
+}
+
+function HeroMapDecor() {
+  return (
+    <div className="lp-hero-map" aria-hidden>
+      <svg viewBox="0 0 960 280" preserveAspectRatio="xMidYMax slice">
+        <path className="lp-hero-map-road" d="M-20 250 C70 238, 110 190, 168 205 S250 248, 318 214 S410 168, 498 206 S590 252, 672 198 S780 132, 890 176 S940 214, 980 198" />
+        <path className="lp-hero-map-road" d="M214 280 C208 232, 246 176, 198 138 S176 74, 228 28" />
+        <path className="lp-hero-map-road" d="M586 280 C562 224, 618 178, 574 128 S612 64, 668 22" />
+        <path className="lp-hero-map-road is-soft" d="M0 188 C90 172, 150 214, 236 178 S360 142, 448 186 S560 228, 650 164 S760 108, 960 148" />
+      </svg>
+    </div>
+  );
 }
 
 function RadarField({ variant = 'hero' }: { variant?: 'hero' | 'cta' }) {
@@ -224,12 +330,12 @@ function RadarField({ variant = 'hero' }: { variant?: 'hero' | 'cta' }) {
     <div className={cx('lp-radar', variant === 'cta' && 'lp-radar-cta')} aria-hidden>
       <div className="lp-radar-plane">
         <svg className="lp-radar-svg" viewBox="0 0 200 200">
-          <line x1="100" y1="2" x2="100" y2="198" opacity="0.28" />
-          <line x1="2" y1="100" x2="198" y2="100" opacity="0.28" />
           {RADAR_RINGS.map((ring) => (
             <circle key={ring.r} cx="100" cy="100" r={ring.r} opacity={ring.o} />
           ))}
         </svg>
+        <div className="lp-radar-smoke" />
+        <div className="lp-radar-glow" />
         <div className="lp-radar-sweep" />
         {pings.map((ping) => (
           <span
@@ -245,28 +351,6 @@ function RadarField({ variant = 'hero' }: { variant?: 'hero' | 'cta' }) {
           </span>
         ))}
       </div>
-    </div>
-  );
-}
-
-function WindowFrame({
-  label,
-  children,
-  className,
-  mascot = false,
-}: {
-  label: string;
-  children: ReactNode;
-  className?: string;
-  mascot?: boolean | 'hero' | 'product';
-}) {
-  return (
-    <div
-      className={cx('lp-frame', className)}
-      {...(mascot ? { 'data-mascot': mascot === true ? 'window' : mascot } : {})}
-    >
-      <p className="legend px-4 pt-3.5">{label}</p>
-      {children}
     </div>
   );
 }
@@ -347,91 +431,6 @@ const DEMO_MAP_LEADS: Lead[] = [
   demoLead(10, 'Fleurs des pentes', 'Fleuriste', 'Lyon 1er', 'fleuriste', '04 78 28 90 17', 45.7698, 4.8274, 4.5, 67, 'Élise Garnier'),
 ];
 
-function MockMark({ name }: { name: string }) {
-  const hue = hueOf(name);
-  return (
-    <span
-      className="lp-mark"
-      style={{
-        background: `linear-gradient(150deg, oklch(0.88 0.09 ${hue}), oklch(0.79 0.11 ${hue + 24}))`,
-        borderColor: `oklch(0.66 0.11 ${hue})`,
-        color: `oklch(0.28 0.07 ${hue})`,
-      }}
-      aria-hidden
-    >
-      {initials(name)}
-      <span
-        className="lp-mark-pin"
-        style={{
-          background: `oklch(0.79 0.11 ${hue + 24})`,
-          borderColor: `oklch(0.66 0.11 ${hue})`,
-        }}
-      />
-    </span>
-  );
-}
-
-function MockDeal({ lead, starred }: { lead: Lead; starred?: boolean }) {
-  const { score, tier } = potential(lead);
-  const filled = { excellent: 4, bon: 3, moyen: 2, faible: 1 }[tier];
-  const color = TIER_COLORS[tier];
-  return (
-    <article className="lp-deal">
-      <MockMark name={lead.name} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <p className="truncate text-[15px] leading-tight font-semibold">{lead.name}</p>
-          {starred ? <Star className="size-3.5 fill-[var(--lp-lime)] text-[var(--lp-lime)]" /> : null}
-          <span className="lp-deal-tag">
-            <Globe className="size-3" />
-            {lead.websiteKind === 'aucun' ? 'aucun site' : 'site'}
-          </span>
-        </div>
-        <p className="mt-0.5 text-xs text-muted">
-          {lead.category} · {lead.city}
-        </p>
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-          {lead.phone ? (
-            <span className="inline-flex items-center gap-1.5 font-semibold text-[color:var(--lp-accent-text)]">
-              <Phone className="size-3.5" />
-              {lead.phone}
-            </span>
-          ) : null}
-          {lead.dirigeant ? (
-            <span className="inline-flex min-w-0 items-center gap-1.5 text-ink">
-              <UserRound className="size-3.5 shrink-0 text-ember" />
-              <span className="truncate">{lead.dirigeant}</span>
-            </span>
-          ) : null}
-        </div>
-      </div>
-      <span className="lp-gauge">
-        <span className="flex items-end gap-[2px]" aria-hidden>
-          {[3, 5.5, 8, 10.5].map((h, i) => (
-            <span
-              key={h}
-              className={cx('w-[3px] rounded-full', i < filled ? color.bg : 'bg-rule-strong')}
-              style={{ height: h }}
-            />
-          ))}
-        </span>
-        <span className={cx('tnum text-[11px] font-semibold', color.text)}>{score}</span>
-      </span>
-    </article>
-  );
-}
-
-function MockSearch({ leads }: { leads: Lead[] }) {
-  const rows = leads.slice(0, 3);
-  return (
-    <div className="lp-mock px-3 pb-3 pt-1">
-      {rows.map((lead, index) => (
-        <MockDeal key={lead.id} lead={lead} starred={index === 1} />
-      ))}
-    </div>
-  );
-}
-
 type SieveKind = 'site' | 'social' | 'directory' | 'parked' | 'none';
 
 const SIEVE_ICONS: Record<SieveKind, typeof Globe> = {
@@ -471,7 +470,7 @@ function WebSieve() {
   const kept = opened - dropped;
 
   return (
-    <div className="lp-sieve lp-reveal" data-mascot="product">
+    <div className="lp-sieve lp-reveal" data-mascot="product" style={{ '--d': '0.2s' } as CSSProperties}>
       <div className="lp-sieve-head">
         <p className="legend">{m.sieve.label}</p>
         <span className="lp-sieve-live" aria-hidden />
@@ -570,12 +569,12 @@ function MapBand({ leads, center, city }: { leads: Lead[]; center: { lat: number
   }, [leads]);
 
   return (
-    <div className="lp-mapband">
+    <div className="lp-mapband lp-reveal" style={{ '--d': '0.16s' } as CSSProperties}>
       <div className="lp-mapband-canvas">
         <GeoMap leads={shown} mode="embed" center={center} className="h-full w-full" />
       </div>
       <div className="lp-mapband-veil" aria-hidden />
-      <div className="lp-mapband-panel">
+      <div className="lp-mapband-panel" data-mascot="band">
         <p className="legend">
           {m.band.label} · {city}
         </p>
@@ -610,8 +609,27 @@ export function LandingPage() {
   const [configured, setConfigured] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoAway, setLogoAway] = useState(false);
+  const [billingInterval, setBillingInterval] = useState<'month' | 'year'>('month');
+  const [priceTick, setPriceTick] = useState(0);
   const logoRef = useRef<HTMLAnchorElement>(null);
+  const pricingSeen = useRef(false);
   useReveal(locale);
+
+  useEffect(() => {
+    const el = document.getElementById('tarifs');
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && !pricingSeen.current) {
+          pricingSeen.current = true;
+          trackPricingView();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const onNavClick = (e: ReactMouseEvent<HTMLAnchorElement>, href: string) => {
     if (!href.startsWith('#')) return;
@@ -639,6 +657,32 @@ export function LandingPage() {
   }, []);
 
   useEffect(() => {
+    if (!LANDING_PHOTOS_ENABLED) return;
+
+    const preload = [
+      'search',
+      'maps',
+      'pipeline',
+      'calls',
+      'export',
+      'trust-1',
+      'trust-2',
+      'trust-3',
+      'trust-4',
+      'trust-google',
+      'plan-starter',
+      'plan-pro',
+      'plan-agence',
+    ];
+    for (const name of preload) {
+      const set = photoSets(name)[0];
+      if (!set) continue;
+      const img = new Image();
+      img.src = set.webp;
+    }
+  }, []);
+
+  useEffect(() => {
     document.title = m.title;
     document.querySelector('meta[name="description"]')?.setAttribute('content', m.hero.lead);
     document.querySelector('meta[property="og:locale"]')?.setAttribute('content', locale === 'en' ? 'en_US' : 'fr_FR');
@@ -648,6 +692,28 @@ export function LandingPage() {
     const root = document.documentElement;
     if (!root.classList.contains('is-boot')) return;
     window.setTimeout(() => root.classList.remove('is-boot'), 2200);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    let raf = 0;
+    const syncScroll = () => {
+      const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      root.style.setProperty('--lp-scroll', (window.scrollY / max).toFixed(4));
+      raf = 0;
+    };
+    const onScroll = () => {
+      if (!raf) raf = window.requestAnimationFrame(syncScroll);
+    };
+    syncScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) window.cancelAnimationFrame(raf);
+      root.style.removeProperty('--lp-scroll');
+    };
   }, []);
 
   useEffect(() => {
@@ -663,6 +729,12 @@ export function LandingPage() {
     return () => ac.abort();
   }, []);
 
+  const pickBillingInterval = (interval: 'month' | 'year') => {
+    if (interval === billingInterval) return;
+    setBillingInterval(interval);
+    setPriceTick((tick) => tick + 1);
+  };
+
   const shownPlans = plans.length ? plans : FALLBACK_PLANS;
   const featureIcons = [Radar, Star, Phone, Map];
   const featurePhotos = ['maps', 'pipeline', 'calls', 'export'] as const;
@@ -676,6 +748,9 @@ export function LandingPage() {
   return (
     <div className="landing">
       <LogoFlight sourceRef={logoRef} onProgress={onLogoProgress} />
+      <div className="lp-head-atmo" aria-hidden>
+        <div className="lp-aura lp-aura-head" />
+      </div>
       <div className="lp-nav-veil" aria-hidden />
       <div className={cx('lp-nav-wrap', menuOpen && 'is-open')}>
         <header className={cx('lp-nav', logoAway && 'is-logo-away')}>
@@ -784,16 +859,27 @@ export function LandingPage() {
         </div>
       </div>
 
-      <main id="top">
-        <section className="lp-glow">
+      <div className="lp-frame lp-frame-head">
+        <section className="lp-glow lp-atmo">
+          <div className="lp-aura lp-aura-hero" aria-hidden />
           <div className="lp-hero-stage">
+            <HeroTopoLines />
             <RadarField />
+            <HeroMapDecor />
             <div className="lp-hero-copy">
-              <p className="lp-chip">{m.hero.chip}</p>
-              <h1 className="lp-hero-title mt-5 sm:mt-6">
-                <GlyphLine text={m.hero.h1a} />
-                <br />
-                <GlyphLine text={m.hero.h1b} className="text-[color:var(--lp-accent-text)]" />
+              <p className="lp-chip lp-chip-hero">
+                <TrendingUp className="lp-chip-hero-icon" aria-hidden />
+                <span>{m.hero.chip}</span>
+              </p>
+              <h1 className="lp-hero-title mt-4 sm:mt-5">
+                <span className="lp-hero-title-stack">
+                  <span className="lp-hero-title-anchor">
+                    <GlyphLine text={m.hero.h1a} />
+                    <span className="lp-hero-title-line2">
+                      <GlyphLine text={m.hero.h1b} className="text-[color:var(--lp-accent-text)]" />
+                    </span>
+                  </span>
+                </span>
               </h1>
               <p className="lp-hero-lead lp-hero-lead-full">{m.hero.lead}</p>
               <p className="lp-hero-lead lp-hero-lead-short">{m.hero.leadShort}</p>
@@ -801,54 +887,74 @@ export function LandingPage() {
                 <Link to={user ? '/app' : '/inscription'} className="lp-btn lp-btn-primary">
                   {user ? m.nav.app : m.hero.cta} <ArrowRight className="size-4" />
                 </Link>
-                <a href="#apercu" className="lp-btn lp-btn-ghost">
+                <a href="#produit" className="lp-btn lp-btn-ghost" onClick={(e) => onNavClick(e, '#produit')}>
                   {m.hero.see}
                 </a>
               </div>
             </div>
-            <div id="apercu" className="lp-hero-mocks">
-              <div className="lp-reveal is-in" style={{ '--d': '0.05s' } as CSSProperties}>
-                <WindowFrame mascot="hero" label={m.mock.noSite}>
-                  <MockSearch leads={demoLeads} />
-                </WindowFrame>
-              </div>
+            <div className="lp-hero-traits">
+              {m.hero.traits.map((item, index) => {
+                const Icon = TRAIT_ICONS[item.k as keyof typeof TRAIT_ICONS];
+                return (
+                  <div key={item.title} className="lp-hero-traits-item">
+                    <span className="lp-hero-traits-icon" aria-hidden>
+                      <Icon className="size-3" />
+                    </span>
+                    <span className="lp-hero-traits-title">{item.title}</span>
+                    {index < m.hero.traits.length - 1 && <span className="lp-hero-traits-sep" aria-hidden />}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </section>
+        <div className="lp-frame-seam lp-frame-seam-bottom" aria-hidden />
+      </div>
 
-        <section className="lp-cv border-y border-[var(--lp-line)]">
-          <div className="lp-steps lp-page">
+      <main id="top" className="lp-body">
+        <section className="lp-cv lp-atmo">
+          <div className="lp-aura lp-aura-steps" aria-hidden />
+          <ol className="lp-journey lp-page">
             {m.steps.map((item, i) => (
-              <div key={item.k} className="lp-reveal lp-interactive" style={{ '--d': `${i * 0.08}s` } as CSSProperties}>
-                <p className="font-mono text-[11px] tracking-widest text-[color:var(--lp-accent-text)]">{item.k}</p>
-                <h2 className="lp-h2 mt-2">
+              <li
+                key={item.k}
+                className="lp-journey-step lp-reveal"
+                style={{ '--d': `${i * 0.08}s` } as CSSProperties}
+                data-mascot="step"
+              >
+                <span className="lp-journey-num" aria-hidden>
+                  {item.k}
+                </span>
+                <h2 className="lp-h2">
                   <GlyphLine text={item.t} />
                 </h2>
                 <p className="mt-2 text-sm leading-relaxed text-muted">{item.d}</p>
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
         </section>
 
-        <section id="produit" className="lp-cv relative">
-          <PhotoSlot name="search" className="lp-section-photo" />
+        <section id="produit" className="lp-cv lp-atmo relative">
+          <div className="lp-aura lp-aura-product" aria-hidden />
+          <PhotoSlot name="search" className="lp-section-photo" delay="0.18s" />
           <div className="lp-section-inner lp-page lp-product-top scroll-mt-24">
             <div className="lp-product-copy">
-              <p className="lp-chip">{m.product.chip}</p>
-              <h2 className="lp-h2 mt-4">
+              <p className="lp-chip lp-reveal lp-reveal-head">{m.product.chip}</p>
+              <h2 className="lp-h2 lp-reveal lp-reveal-head mt-4" style={{ '--d': '0.07s' } as CSSProperties}>
                 <GlyphLine text={m.product.h2} />
               </h2>
-              <p className="mt-4 text-muted">{m.product.lead}</p>
+              <p className="lp-reveal mt-4 text-muted" style={{ '--d': '0.14s' } as CSSProperties}>{m.product.lead}</p>
             </div>
             <WebSieve />
           </div>
           <MapBand leads={demoLeads} center={place} city={place.city} />
         </section>
 
-        <section id="fonctionnalites" className="lp-cv border-y border-[var(--lp-line)] bg-[var(--lp-surface)]">
+        <section id="fonctionnalites" className="lp-cv lp-atmo">
+          <div className="lp-aura lp-aura-features" aria-hidden />
           <div className="lp-page scroll-mt-24">
-            <p className="lp-chip">{m.features.chip}</p>
-            <h2 className="lp-h2 mt-4">
+            <p className="lp-chip lp-reveal lp-reveal-head">{m.features.chip}</p>
+            <h2 className="lp-h2 lp-reveal lp-reveal-head mt-4" style={{ '--d': '0.07s' } as CSSProperties}>
               <GlyphLine text={m.features.h2} />
             </h2>
             <div className="lp-features-grid mt-10">
@@ -857,10 +963,11 @@ export function LandingPage() {
                 return (
                   <article
                     key={item.title}
-                    className="lp-feature lp-interactive lp-reveal overflow-hidden rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-7"
+                    className="lp-feature lp-reveal overflow-hidden rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-7"
+                    style={{ '--d': `${0.1 + index * 0.08}s` } as CSSProperties}
                     {...(index === 0 ? { 'data-mascot': 'feature' } : {})}
                   >
-                    <PhotoSlot name={featurePhotos[index]} />
+                    <PhotoSlot name={featurePhotos[index]} delay={`${0.14 + index * 0.08}s`} />
                     <span className="inline-flex size-11 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_18%,transparent)] text-[color:var(--lp-accent-text)]">
                       <Icon className="size-5" />
                     </span>
@@ -878,44 +985,49 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="lp-cv lp-page text-center" data-mascot="launch">
-          <p className="lp-chip">{m.launch.chip}</p>
-          <h2 className="lp-h2 mx-auto mt-4 max-w-2xl">
-            <GlyphLine text={m.launch.h2} />
-          </h2>
-          <p className="mx-auto mt-4 max-w-lg text-muted">{m.launch.lead}</p>
-          <div className="lp-command mt-10 text-left">
-            <MapPin className="size-4 shrink-0 text-[color:var(--lp-accent-text)]" />
-            <p className="min-w-0 flex-1 font-mono text-[13px] tracking-tight">
-              <span className="text-ink">{place.city}</span>
-              <span className="text-faint"> · </span>
-              <span className="text-muted">coiffeur, plombier, garage</span>
-              <span className="text-faint"> · </span>
-              <span className="text-[color:var(--lp-accent-text)]">{m.mock.noSiteTag}</span>
-            </p>
-            <Link to="/inscription" className="lp-btn lp-btn-primary h-10 px-4 text-sm">
-              {m.launch.run}
-            </Link>
+        <section className="lp-cv lp-atmo lp-launch text-center" data-mascot="launch">
+          <div className="lp-aura lp-aura-launch" aria-hidden />
+          <div className="lp-page scroll-mt-24">
+            <p className="lp-chip lp-reveal lp-reveal-head">{m.launch.chip}</p>
+            <h2 className="lp-h2 lp-reveal lp-reveal-head mx-auto mt-4 max-w-2xl" style={{ '--d': '0.07s' } as CSSProperties}>
+              <GlyphLine text={m.launch.h2} />
+            </h2>
+            <p className="lp-reveal mx-auto mt-4 max-w-lg text-muted" style={{ '--d': '0.14s' } as CSSProperties}>{m.launch.lead}</p>
+            <div className="lp-command lp-command-live lp-reveal mt-10 text-left" style={{ '--d': '0.22s' } as CSSProperties}>
+              <MapPin className="size-4 shrink-0 text-[color:var(--lp-accent-text)]" />
+              <p className="min-w-0 flex-1 font-mono text-[13px] tracking-tight">
+                <span className="text-ink">{place.city}</span>
+                <span className="text-faint"> · </span>
+                <span className="text-muted">coiffeur, plombier, garage</span>
+                <span className="text-faint"> · </span>
+                <span className="text-[color:var(--lp-accent-text)]">{m.mock.noSiteTag}</span>
+              </p>
+              <Link to="/inscription" className="lp-btn lp-btn-primary h-10 px-4 text-sm">
+                {m.launch.run}
+              </Link>
+            </div>
           </div>
         </section>
 
-        <section id="confiance" className="lp-cv border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
+        <section id="confiance" className="lp-cv lp-atmo">
+          <div className="lp-aura lp-aura-trust" aria-hidden />
           <div className="lp-page scroll-mt-24">
-            <p className="lp-chip">{m.trust.chip}</p>
-            <h2 className="lp-h2 mt-4 max-w-2xl">
+            <p className="lp-chip lp-reveal lp-reveal-head">{m.trust.chip}</p>
+            <h2 className="lp-h2 lp-reveal lp-reveal-head mt-4 max-w-2xl" style={{ '--d': '0.07s' } as CSSProperties}>
               <GlyphLine text={m.trust.h2} />
             </h2>
-            <p className="mt-4 max-w-xl text-muted">{m.trust.lead}</p>
-            <ul className="lp-features-grid mt-10">
+            <p className="lp-reveal mt-4 max-w-xl text-muted" style={{ '--d': '0.14s' } as CSSProperties}>{m.trust.lead}</p>
+            <ul className="lp-trust-grid mt-10">
               {m.trust.items.map((item, index) => {
                 const Icon = [Lock, Shield, Table2, Check][index];
                 return (
-                    <li
-                      key={item.title}
-                      className="lp-trust-card lp-reveal lp-interactive flex gap-4 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5"
-                      {...(index === 0 ? { 'data-mascot': 'trust' } : {})}
-                    >
-                    <PhotoSlot name={`trust-${index + 1}`} />
+                  <li
+                    key={item.title}
+                    className="lp-trust-card lp-reveal flex gap-4 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5"
+                    style={{ '--d': `${0.1 + index * 0.07}s` } as CSSProperties}
+                    {...(index === 0 ? { 'data-mascot': 'trust' } : {})}
+                  >
+                    <PhotoSlot name={`trust-${index + 1}`} className="lp-trust-photo" delay={`${0.14 + index * 0.07}s`} />
                     <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_16%,transparent)] text-[color:var(--lp-accent-text)]">
                       <Icon className="size-4" />
                     </span>
@@ -927,8 +1039,8 @@ export function LandingPage() {
                 );
               })}
             </ul>
-            <aside className="lp-trust-card lp-reveal mt-8 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6">
-              <PhotoSlot name="trust-google" />
+            <aside className="lp-trust-card lp-trust-wide lp-reveal mt-5 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6" style={{ '--d': '0.38s' } as CSSProperties}>
+              <PhotoSlot name="trust-google" className="lp-trust-photo" delay="0.42s" />
               <h3 className="text-lg">{m.trust.googleTitle}</h3>
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{m.trust.googleText}</p>
               <Link to="/confidentialite" className="mt-3 inline-block text-sm font-medium text-lime-deep">
@@ -938,50 +1050,87 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section id="tarifs" className="lp-cv border-t border-[var(--lp-line)]">
+        <section id="tarifs" className="lp-cv lp-atmo">
+          <div className="lp-aura lp-aura-pricing" aria-hidden />
           <div className="lp-page scroll-mt-24">
-            <p className="lp-chip">{m.pricing.chip}</p>
-            <h2 className="lp-h2 mt-4">
+            <p className="lp-chip lp-reveal lp-reveal-head">{m.pricing.chip}</p>
+            <h2 className="lp-h2 lp-reveal lp-reveal-head mt-4" style={{ '--d': '0.07s' } as CSSProperties}>
               <GlyphLine text={m.pricing.h2} />
             </h2>
-            <p className="mt-4 max-w-xl text-muted">{m.pricing.lead}</p>
-            <div className="lp-plans mt-10">
+            <p className="lp-reveal mt-4 max-w-xl text-muted" style={{ '--d': '0.14s' } as CSSProperties}>{m.pricing.lead}</p>
+            <div className="lp-billing-toggle lp-reveal mt-8" style={{ '--d': '0.2s' } as CSSProperties} role="group" aria-label={m.pricing.chip}>
+              <button
+                type="button"
+                className={cx('lp-billing-btn', billingInterval === 'month' && 'is-on')}
+                onClick={() => pickBillingInterval('month')}
+              >
+                {m.pricing.monthly}
+              </button>
+              <button
+                type="button"
+                className={cx('lp-billing-btn', billingInterval === 'year' && 'is-on')}
+                onClick={() => pickBillingInterval('year')}
+              >
+                {m.pricing.yearly}
+                <span className="lp-billing-save">{m.pricing.yearlyHint}</span>
+              </button>
+            </div>
+            <div className="lp-plans mt-8">
               {shownPlans.map((plan) => (
                 <article
                   key={plan.id}
                   className={cx(
-                    'lp-reveal lp-interactive lp-plan flex flex-col rounded-2xl border p-7',
-                    plan.highlighted
-                      ? 'border-[color:var(--lp-lime)] bg-[color-mix(in_oklab,var(--lp-lime)_10%,var(--lp-surface))]'
-                      : 'border-[var(--lp-line)] bg-[color-mix(in_oklab,var(--lp-surface)_88%,transparent)]',
+                    'lp-reveal lp-plan-card lp-plan-card-full overflow-hidden rounded-2xl border',
+                    plan.highlighted ? 'is-hot border-[color:var(--lp-lime)]' : 'border-[var(--lp-line)]',
                   )}
+                  style={{ '--d': `${0.12 + shownPlans.indexOf(plan) * 0.1}s` } as CSSProperties}
                   {...(plan.highlighted ? { 'data-mascot': 'plan' } : {})}
                 >
-                  <PhotoSlot name={`plan-${plan.id}`} />
-                  <h3 className="text-2xl">{plan.name}</h3>
-                  <p className="mt-1 text-sm text-muted">{plan.tagline}</p>
-                  <p className="mt-6 font-[family-name:var(--font-display)] text-4xl tracking-tight">{plan.amountLabel}</p>
-                  <p className="legend mt-1">{m.pricing.month}</p>
-                  <ul className="mt-6 flex-1 space-y-2.5 text-sm">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex gap-2">
-                        <Check className="mt-0.5 size-4 shrink-0 text-[color:var(--lp-accent-text)]" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                    {(plan.locked ?? []).map((feature) => (
-                      <li key={feature} className="flex gap-2 text-faint">
-                        <X className="mt-0.5 size-4 shrink-0" />
-                        <span>{feature}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  <Link
-                    to={configured && plan.priceConfigured ? `/abonnement?plan=${plan.id}` : '/inscription'}
-                    className={cx('lp-btn mt-8 w-full', plan.highlighted ? 'lp-btn-primary' : 'lp-btn-ghost')}
-                  >
-                    {plan.cta}
-                  </Link>
+                  <PhotoSlot name={`plan-${plan.id}`} className="lp-plan-photo-full" delay={`${0.2 + shownPlans.indexOf(plan) * 0.1}s`} />
+                  <div className="lp-plan-overlay">
+                    <h3 className="text-2xl">{plan.name}</h3>
+                    <p className="mt-1 text-sm text-muted">{plan.tagline}</p>
+                    <p
+                      key={`${plan.id}-${billingInterval}-${priceTick}`}
+                      className="lp-plan-price lp-price-swap mt-5 font-[family-name:var(--font-display)] text-4xl tracking-tight"
+                    >
+                      {billingInterval === 'month' ? plan.amountLabel : plan.annualAmountLabel}
+                    </p>
+                    <p className="legend mt-1">{billingInterval === 'month' ? m.pricing.month : m.pricing.year}</p>
+                    {billingInterval === 'year' && (
+                      <div key={`${plan.id}-meta-${priceTick}`} className="lp-plan-annual-meta lp-price-swap mt-2">
+                        <p className="text-sm text-muted">
+                          <span className="line-through">{plan.annualWasLabel}</span>
+                          <span className="ml-2 text-lime-deep">{plan.annualBadge}</span>
+                        </p>
+                      </div>
+                    )}
+                    <ul className="mt-5 flex-1 space-y-2 text-sm">
+                      {plan.features.map((feature) => (
+                        <li key={feature} className="flex gap-2">
+                          <Check className="mt-0.5 size-4 shrink-0 text-[color:var(--lp-accent-text)]" />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                      {(plan.locked ?? []).map((feature) => (
+                        <li key={feature} className="flex gap-2 text-faint">
+                          <X className="mt-0.5 size-4 shrink-0" />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Link
+                      to={
+                        configured &&
+                        (billingInterval === 'month' ? plan.priceConfigured : plan.annualPriceConfigured)
+                          ? `/abonnement?plan=${plan.id}&interval=${billingInterval}`
+                          : '/inscription'
+                      }
+                      className={cx('lp-btn mt-6 w-full', plan.highlighted ? 'lp-btn-primary' : 'lp-btn-ghost')}
+                    >
+                      {plan.cta}
+                    </Link>
+                  </div>
                 </article>
               ))}
             </div>
@@ -989,15 +1138,24 @@ export function LandingPage() {
         </section>
       </main>
 
-      <div className="lp-end">
-          <RadarField variant="cta" />
-          <section className="lp-cta-band relative border-t border-[var(--lp-line)] text-center" data-mascot="cta">
-            <div className="lp-page relative">
-              <h2 className="lp-h2 mx-auto max-w-3xl">
+      <div className="lp-frame lp-frame-foot">
+        <div className="lp-frame-seam lp-frame-seam-top" aria-hidden />
+
+        <section className="lp-glow lp-atmo">
+          <div className="lp-aura lp-aura-hero" aria-hidden />
+          <div className="lp-foot-cap" data-mascot="cta">
+            <RadarField />
+            <div className="lp-page lp-foot-cta">
+              <h2 className="lp-h2 lp-reveal lp-reveal-head mx-auto max-w-3xl">
                 <GlyphLine text={m.cta.h2} />
               </h2>
-              <p className="mx-auto mt-4 max-w-lg text-muted">{m.cta.lead}</p>
-              <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <p className="lp-reveal mx-auto mt-4 max-w-lg text-muted" style={{ '--d': '0.1s' } as CSSProperties}>
+                {m.cta.lead}
+              </p>
+              <div
+                className="lp-reveal lp-cta-actions mt-8 flex flex-wrap justify-center gap-3"
+                style={{ '--d': '0.18s' } as CSSProperties}
+              >
                 <Link to="/inscription" className="lp-btn lp-btn-primary">
                   {m.cta.create} <ArrowRight className="size-4" />
                 </Link>
@@ -1006,76 +1164,83 @@ export function LandingPage() {
                 </Link>
               </div>
             </div>
-          </section>
-      </div>
+          </div>
+        </section>
 
-          <footer className="border-t border-[var(--lp-line)] bg-[var(--lp-surface)]">
-            <div className="mx-auto flex max-w-6xl flex-col gap-12 px-[clamp(1rem,4vw,1.5rem)] py-14 sm:flex-row sm:justify-between">
-              <div>
+        <footer className="lp-foot">
+          <div className="lp-foot-rail" aria-hidden />
+          <div className="lp-page lp-foot-inner lp-reveal">
+            <div className="lp-foot-grid">
+              <div className="lp-foot-brand">
                 <a href="#top" className="lp-footer-logo" data-mascot="dock" aria-label="Prospy" />
-                <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">{m.footer.blurb}</p>
+                <p className="lp-foot-blurb">{m.footer.blurb}</p>
+                <div className="lp-foot-theme">
+                  <span className="legend">{m.footer.look}</span>
+                  <ThemeToggle />
+                </div>
               </div>
-          <div className="grid grid-cols-2 gap-10 text-sm sm:grid-cols-4">
-            <div>
-              <p className="legend mb-3">{m.footer.product}</p>
-              <ul className="space-y-2 text-muted">
-                <li>
-                  <a href="#fonctionnalites" className="hover:text-ink">
-                    {m.nav.features}
-                  </a>
-                </li>
-                <li>
-                  <a href="#tarifs" className="hover:text-ink">
-                    {m.nav.pricing}
-                  </a>
-                </li>
-                <li>
-                  <Link to="/app" className="hover:text-ink">
-                    {m.cta.open}
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <p className="legend mb-3">{m.footer.account}</p>
-              <ul className="space-y-2 text-muted">
-                <li>
-                  <Link to="/inscription" className="hover:text-ink">
-                    {m.cta.create}
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/connexion" className="hover:text-ink">
-                    {m.nav.login}
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <p className="legend mb-3">{m.footer.legal}</p>
-              <ul className="space-y-2 text-muted">
-                <li>
-                  <Link to="/cgu" className="hover:text-ink">
-                    {m.footer.terms}
-                  </Link>
-                </li>
-                <li>
-                  <Link to="/confidentialite" className="hover:text-ink">
-                    {m.footer.privacy}
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <p className="legend mb-3">{m.footer.look}</p>
-              <ThemeToggle />
+              <nav className="lp-foot-links" aria-label={m.footer.product}>
+                <div className="lp-foot-col">
+                  <p className="legend">{m.footer.product}</p>
+                  <ul>
+                    <li>
+                      <a href="#fonctionnalites" className="hover:text-ink">
+                        {m.nav.features}
+                      </a>
+                    </li>
+                    <li>
+                      <a href="#tarifs" className="hover:text-ink">
+                        {m.nav.pricing}
+                      </a>
+                    </li>
+                    <li>
+                      <Link to="/app" className="hover:text-ink">
+                        {m.cta.open}
+                      </Link>
+                    </li>
+                  </ul>
+                </div>
+                <div className="lp-foot-col">
+                  <p className="legend">{m.footer.account}</p>
+                  <ul>
+                    <li>
+                      <Link to="/inscription" className="hover:text-ink">
+                        {m.cta.create}
+                      </Link>
+                    </li>
+                    <li>
+                      <Link to="/connexion" className="hover:text-ink">
+                        {m.nav.login}
+                      </Link>
+                    </li>
+                  </ul>
+                </div>
+                <div className="lp-foot-col">
+                  <p className="legend">{m.footer.legal}</p>
+                  <ul>
+                    <li>
+                      <Link to="/cgu" className="hover:text-ink">
+                        {m.footer.terms}
+                      </Link>
+                    </li>
+                    <li>
+                      <Link to="/confidentialite" className="hover:text-ink">
+                        {m.footer.privacy}
+                      </Link>
+                    </li>
+                  </ul>
+                </div>
+              </nav>
             </div>
           </div>
-        </div>
-        <div className="border-t border-[var(--lp-line)]">
-          <p className="mx-auto max-w-6xl px-4 py-5 pb-8 font-mono text-[11px] tracking-wide text-faint sm:px-6">{m.footer.copy}</p>
-        </div>
-      </footer>
+          <p
+            className="lp-foot-copy lp-reveal mx-auto max-w-6xl px-4 text-center font-mono text-[11px] tracking-wide text-faint sm:px-6"
+            style={{ '--d': '0.12s' } as CSSProperties}
+          >
+            {m.footer.copy}
+          </p>
+        </footer>
+      </div>
     </div>
   );
 }

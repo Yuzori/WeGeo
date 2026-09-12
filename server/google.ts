@@ -8,12 +8,8 @@ import { publicBaseUrl } from './security.ts';
 import { toRows } from './export.ts';
 import type { Lead } from '../shared/types.ts';
 
-const SCOPES = [
-  'openid',
-  'email',
-  'profile',
-  'https://www.googleapis.com/auth/spreadsheets',
-];
+const LOGIN_SCOPES = ['openid', 'email', 'profile'];
+const SHEETS_SCOPES = [...LOGIN_SCOPES, 'https://www.googleapis.com/auth/spreadsheets'];
 
 export function googleConfigured(): boolean {
   return Boolean(process.env.GOOGLE_CLIENT_ID?.trim() && process.env.GOOGLE_CLIENT_SECRET?.trim());
@@ -30,12 +26,12 @@ export function googleClient(req: Request): OAuth2Client {
   return new OAuth2Client(id, secret, googleRedirectUri(req));
 }
 
-export function googleAuthUrl(req: Request, state: string): string {
+export function googleAuthUrl(req: Request, state: string, sheets = false): string {
   return googleClient(req).generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: true,
-    scope: SCOPES,
+    scope: sheets ? SHEETS_SCOPES : LOGIN_SCOPES,
     state,
   });
 }

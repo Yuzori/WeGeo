@@ -150,29 +150,68 @@ export function searchSessionKey(workspaceId: number | string): string {
   return `${SESSION_KEY}.${workspaceId}`;
 }
 
-/** Persiste une préférence dans le navigateur (options de recherche, ville…). */
-export function useStored<T>(key: string, initial: T): [T, Dispatch<SetStateAction<T>>] {
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return initial;
-      const parsed = JSON.parse(raw) as T;
-      // Fusion pour les objets d'options : les nouvelles clés gardent leur défaut.
-      const mergeable =
-        parsed && initial && typeof parsed === 'object' && typeof initial === 'object' && !Array.isArray(initial);
-      return mergeable ? { ...initial, ...parsed } : parsed;
-    } catch {
-      return initial;
+export const LEGACY_SEARCH_CITY_KEY = 'wegeo.city';
+export const LEGACY_SEARCH_DOMAINS_KEY = 'wegeo.domains';
+export const LEGACY_SEARCH_OPTIONS_KEY = 'wegeo.options';
+
+export function searchCityKey(workspaceId: number | string): string {
+  return `wegeo.city.${workspaceId}`;
+}
+
+export function searchDomainsKey(workspaceId: number | string): string {
+  return `wegeo.domains.${workspaceId}`;
+}
+
+export function searchOptionsKey(workspaceId: number | string): string {
+  return `wegeo.options.${workspaceId}`;
+}
+
+function parseStored<T>(raw: string, initial: T): T {
+  const parsed = JSON.parse(raw) as T;
+  const mergeable =
+    parsed && initial && typeof parsed === 'object' && typeof initial === 'object' && !Array.isArray(initial);
+  return mergeable ? { ...initial, ...parsed } : parsed;
+}
+
+function readStored<T>(key: string, initial: T, legacyKey?: string): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return parseStored(raw, initial);
+    if (legacyKey) {
+      const legacyRaw = localStorage.getItem(legacyKey);
+      if (legacyRaw) {
+        const value = parseStored(legacyRaw, initial);
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch {
+          /* stockage indisponible */
+        }
+        return value;
+      }
     }
-  });
+    return initial;
+  } catch {
+    return initial;
+  }
+}
+
+/** Persiste une préférence dans le navigateur (options de recherche, ville…). */
+export function useStored<T>(key: string, initial: T, legacyKey?: string): [T, Dispatch<SetStateAction<T>>] {
+  const keyRef = useRef(key);
+  const [value, setValue] = useState<T>(() => readStored(key, initial, legacyKey));
 
   useEffect(() => {
+    if (keyRef.current !== key) {
+      keyRef.current = key;
+      setValue(readStored(key, initial, legacyKey));
+      return;
+    }
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch {
       /* stockage indisponible */
     }
-  }, [key, value]);
+  }, [key, value, initial, legacyKey]);
 
   return [value, setValue];
 }
