@@ -592,23 +592,17 @@
 .lp-section-photo img,
 .lp-plan-photo-full img {
   opacity: 0;
-  transform: scale(1.02);
-  transition:
-    opacity 0.55s var(--ease-out-quint),
-    transform 0.55s var(--ease-out-quint);
-  transition-delay: var(--photo-d, 0.12s);
+  transition: opacity 0.22s ease-out;
 }
 
 .lp-trust-photo img.is-ready,
 .lp-feature-photo img.is-ready,
 .lp-section-photo img.is-ready {
   opacity: 0.72;
-  transform: none;
 }
 
 .lp-plan-photo-full img.is-ready {
   opacity: 0.78;
-  transform: none;
 }
 
 .dark .lp-trust-photo img.is-ready,
@@ -626,8 +620,7 @@
 .lp-section-photo::after,
 .lp-plan-photo-full::after {
   opacity: 0;
-  transition: opacity 0.88s var(--ease-out-quint);
-  transition-delay: var(--photo-d, 0.12s);
+  transition: opacity 0.25s ease-out;
 }
 
 .lp-trust-photo:has(img.is-ready)::after,

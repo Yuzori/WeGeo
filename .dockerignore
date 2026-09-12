@@ -8,3 +8,8 @@ tmp
 *.log
 README.md
 wegeo first v
+backup-*
+*.tgz
+prospy-deploy.tgz
+server/**/*.js
+server/**/*.d.ts

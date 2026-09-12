@@ -7,9 +7,9 @@ import { basename, extname, join } from 'node:path';
 import sharp from 'sharp';
 
 const ROOT = join(import.meta.dirname, '..', '..', 'public');
-const MAX_WIDTH = 1600;
-const WEBP_QUALITY = 84;
-const JPEG_QUALITY = 85;
+const MAX_WIDTH = 960;
+const WEBP_QUALITY = 72;
+const JPEG_QUALITY = 74;
 
 const LANDING_NAMES = new Set([
   'maps',

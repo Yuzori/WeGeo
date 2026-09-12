@@ -151,16 +151,17 @@ const RADAR_RINGS = [
 
 const LANDING_PHOTOS_ENABLED = true;
 
-function photoSets(name: string): Array<{ webp: string; img: string }> {
-  const folders = ['', 'landing/'];
-  const sets: Array<{ webp: string; img: string }> = [];
-  for (const folder of folders) {
-    for (const ext of ['jpg', 'jpeg', 'png'] as const) {
-      sets.push({ webp: `/${folder}${name}.webp`, img: `/${folder}${name}.${ext}` });
-    }
-  }
-  return sets;
-}
+const LANDING_PHOTOS: Record<string, { webp: string; img: string }> = {
+  maps: { webp: '/maps.webp', img: '/maps.jpg' },
+  pipeline: { webp: '/pipeline.webp', img: '/pipeline.jpg' },
+  calls: { webp: '/calls.webp', img: '/calls.jpg' },
+  export: { webp: '/export.webp', img: '/export.jpg' },
+  'trust-1': { webp: '/trust-1.webp', img: '/trust-1.jpg' },
+  'trust-2': { webp: '/trust-2.webp', img: '/trust-2.jpg' },
+  'trust-3': { webp: '/trust-3.webp', img: '/trust-3.jpg' },
+  'trust-4': { webp: '/trust-4.webp', img: '/trust-4.jpg' },
+  'trust-google': { webp: '/trust-google.webp', img: '/trust-google.jpg' },
+};
 
 function PhotoSlot({
   name,
@@ -171,53 +172,15 @@ function PhotoSlot({
   className?: string;
   delay?: string;
 }) {
-  const sets = useMemo(() => photoSets(name), [name]);
-  const [setIndex, setSetIndex] = useState(0);
-  const current = sets[setIndex] ?? null;
-  const [loaded, setLoaded] = useState(false);
-  const [inView, setInView] = useState(false);
+  const current = LANDING_PHOTOS[name];
   const [ready, setReady] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setSetIndex(0);
-    setLoaded(false);
-    setInView(false);
     setReady(false);
   }, [name]);
 
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          setInView(true);
-          io.unobserve(entry.target);
-        }
-      },
-      { threshold: [0, 0.06, 0.12], rootMargin: '60px 0px 100px 0px' },
-    );
-
-    io.observe(node);
-    return () => io.disconnect();
-  }, [name]);
-
-  useEffect(() => {
-    if (!loaded || !inView || ready) return;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => setReady(true));
-    });
-  }, [loaded, inView, ready]);
-
-  useEffect(() => {
-    const img = ref.current?.querySelector('img');
-    if (img?.complete && img.naturalWidth > 0) setLoaded(true);
-  }, [current?.img, setIndex]);
-
-  if (!LANDING_PHOTOS_ENABLED) return null;
+  if (!LANDING_PHOTOS_ENABLED || !current) return null;
 
   return (
     <div
@@ -226,33 +189,20 @@ function PhotoSlot({
       style={{ '--photo-d': delay } as CSSProperties}
       aria-hidden
     >
-      {current ? (
-        <picture>
-          <source srcSet={current.webp} type="image/webp" />
-          <img
-            src={current.img}
-            alt=""
-            width={1200}
-            height={800}
-            loading="lazy"
-            decoding="async"
-            fetchPriority="low"
-            className={ready ? 'is-ready' : undefined}
-            onLoad={() => setLoaded(true)}
-            onError={() => {
-              setSetIndex((index) => {
-                const next = index + 1;
-                if (next < sets.length) {
-                  setLoaded(false);
-                  setReady(false);
-                  return next;
-                }
-                return index;
-              });
-            }}
-          />
-        </picture>
-      ) : null}
+      <picture>
+        <source srcSet={current.webp} type="image/webp" />
+        <img
+          src={current.img}
+          alt=""
+          width={960}
+          height={640}
+          sizes="(max-width: 768px) 100vw, 720px"
+          loading="lazy"
+          decoding="async"
+          className={ready ? 'is-ready' : undefined}
+          onLoad={() => setReady(true)}
+        />
+      </picture>
     </div>
   );
 }
@@ -654,32 +604,6 @@ export function LandingPage() {
       window.removeEventListener('resize', close);
       window.removeEventListener('hashchange', close);
     };
-  }, []);
-
-  useEffect(() => {
-    if (!LANDING_PHOTOS_ENABLED) return;
-
-    const preload = [
-      'search',
-      'maps',
-      'pipeline',
-      'calls',
-      'export',
-      'trust-1',
-      'trust-2',
-      'trust-3',
-      'trust-4',
-      'trust-google',
-      'plan-starter',
-      'plan-pro',
-      'plan-agence',
-    ];
-    for (const name of preload) {
-      const set = photoSets(name)[0];
-      if (!set) continue;
-      const img = new Image();
-      img.src = set.webp;
-    }
   }, []);
 
   useEffect(() => {

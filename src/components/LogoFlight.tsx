@@ -33,12 +33,12 @@ import { useI18n } from '../i18n';
  * Deux règles tiennent tout le fichier :
  *
  * 1. Aucune lecture de mise en page pendant l'animation. Les branches sont
- *    mesurées sur événement (scroll arrêté, resize, mutation du DOM) puis
- *    conservées en coordonnées page. La boucle de rendu ne fait que du calcul.
+ *    mesurées à l'arrêt (resize, mutation, fin de scroll). La boucle de rendu
+ *    ne fait que du calcul.
  *
- * 2. Les cibles vivent en coordonnées page, pas écran. Pendant un défilement la
- *    mascotte reste donc collée à sa branche sans la poursuivre, ce qui supprime
- *    le retard et les micro-sauts.
+ * 2. Pendant un défilement la mascotte reste figée à l'écran. Elle ne poursuit
+ *    pas la page, ne change pas de branche et ne suit pas le pointeur. Dès que
+ *    la page est immobile, elle reprend (regard, vol vers la branche visible).
  */
 
 const GLTF_CANDIDATES = ['/model-optimized.glb', '/model.glb', '/model.gltf'];
@@ -64,8 +64,6 @@ const STAGE_LANDING = 208;
 const CAM_FOV = 28;
 const CAM_Z = 8;
 const WORLD_H = 2 * Math.tan(((CAM_FOV * Math.PI) / 180) / 2) * CAM_Z;
-/** Épaisseur visuelle du logo après simplification du GLB (axe X/Z). */
-const MASCOT_BULK = 1.18;
 
 function isMobileViewport(): boolean {
   return window.matchMedia('(max-width: 767px), (pointer: coarse)').matches;
@@ -83,7 +81,7 @@ function renderDpr(onLanding: boolean): number {
 }
 
 function scrollSettleMs(): number {
-  return isMobileViewport() ? 160 : 110;
+  return isMobileViewport() ? 180 : 140;
 }
 
 /** Hauteur de visée dans le viewport pour choisir une branche. */
@@ -266,9 +264,15 @@ function refit(wrap: Group) {
   box.getCenter(center);
   box.getSize(size);
   inner.position.sub(center);
+  const width = Math.max(size.x, 1e-4);
+  const height = Math.max(size.y, 1e-4);
+  inner.scale.set(height / width, 1, 1);
+  inner.updateMatrixWorld(true);
+  box.setFromObject(inner);
+  box.getSize(size);
+  box.getCenter(center);
+  inner.position.sub(center);
   inner.scale.multiplyScalar(1 / Math.max(size.y, 1e-4));
-  inner.scale.x *= MASCOT_BULK;
-  inner.scale.z *= MASCOT_BULK;
   inner.updateMatrixWorld(true);
   box.setFromObject(inner);
   box.getCenter(center);
@@ -666,6 +670,8 @@ export function LogoFlight({
     let scrollAt = 0;
     let lastScrollY = window.scrollY;
     let scrollSpeed = 0;
+    let scrollLock = false;
+    const freezePos = { x: 0, y: 0 };
 
     let spinY = 0.22;
     let spinVel = 0;
@@ -945,17 +951,31 @@ export function LogoFlight({
       const dy = sy - lastScrollY;
       lastScrollY = sy;
       if (Math.abs(dy) > 0.5) {
+        if (!scrollLock) {
+          scrollLock = true;
+          freezePos.x = pos.x;
+          freezePos.y = pos.y;
+          if (phase !== 'perched') {
+            phase = 'perched';
+            landT = 99;
+          }
+          needsRender = 1;
+        }
         scrollAt = now;
         scrollSpeed = Math.abs(dy) / Math.max(dt, 0.008);
-      } else if (now - scrollAt > scrollSettleMs()) {
+      } else if (scrollLock && now - scrollAt > scrollSettleMs()) {
+        scrollLock = false;
+        scrollSpeed = 0;
+        pickDue = true;
+        needsRender = 2;
+      } else if (!scrollLock && now - scrollAt > scrollSettleMs()) {
         scrollSpeed = 0;
       }
-      const settled = now - scrollAt > scrollSettleMs();
-      const scrolling = !settled && scrollSpeed > 48;
+      const scrolling = scrollLock;
+      const settled = !scrolling;
 
-      // Remesure à l'arrêt. Le choix, lui, n'a lieu que sur événement
-      // (scroll, resize, mutation) : le recalculer chaque image faisait
-      // navette dès qu'un témoin d'intersection clignotait.
+      // Remesure à l'arrêt seulement. Pendant le geste on ne touche ni aux
+      // branches ni à la position : la mascotte reste collée à l'écran.
       if (settled && pickDue) {
         for (const [el, perch] of registry) {
           const fresh = measurePerch(el, perch.s);
@@ -970,6 +990,7 @@ export function LogoFlight({
       const tracked = target.el ? (registry.get(target.el) ?? target) : target;
       const offScreen =
         !guided &&
+        settled &&
         phase === 'perched' &&
         tracked.kind !== 'home' &&
         tracked.kind !== 'dock' &&
@@ -977,17 +998,18 @@ export function LogoFlight({
           screenY(tracked, sy) < -vhNow * 0.1 ||
           screenY(tracked, sy) > vhNow * 0.92);
 
-      // Pendant le geste elle reste collée à sa branche (coordonnées page) :
-      // monter ou descendre est une translation, jamais un saut. On ne
-      // change de branche qu'à l'arrêt, sauf pour quitter la barre ou si
-      // la branche actuelle sort de l'écran.
-      if (!guided && phase === 'perched' && !onPage && sy > HOME_LEAVE) {
+      if (scrolling) {
+        pos.x = freezePos.x;
+        pos.y = freezePos.y;
+        needsRender = 0;
+        return;
+      } else if (!guided && phase === 'perched' && !onPage && sy > HOME_LEAVE) {
         const next = choose(now, sy);
         if (next.kind !== 'home') takeOff(next);
-      } else if (offScreen && settled) {
+      } else if (offScreen) {
         const next = choose(now, sy);
         if (next.id !== target.id) takeOff(next);
-      } else if (guided || (settled && phase === 'perched' && pickDue)) {
+      } else if (guided || (phase === 'perched' && pickDue)) {
         const next = choose(now, sy);
         if (next.id !== target.id) takeOff(next);
         else target = next;
@@ -1019,19 +1041,11 @@ export function LogoFlight({
           pickDue = true;
         }
       } else if (phase === 'perched') {
-        const pageScroll = Math.abs(dy) > 0.5;
-        if (scrolling || pageScroll) {
-          // Collée à la branche pendant le scroll : pas de lissage (sinon retard visible).
-          pos.x = dest.x;
-          pos.y = dest.y;
-          pos.s = target.s;
-        } else {
-          const bobX = Math.sin(life * 0.62) * (target.kind === 'home' ? 0.6 : 1.9);
-          const bobY = Math.cos(life * 0.47) * (target.kind === 'home' ? 0.5 : 1.6);
-          pos.x = smoothTo(pos.x, dest.x + bobX, dt, onLanding ? 0.07 : 0.09);
-          pos.y = smoothTo(pos.y, dest.y + bobY, dt, onLanding ? 0.07 : 0.09);
-          pos.s = smoothTo(pos.s, target.s, dt, 0.22);
-        }
+        const bobX = Math.sin(life * 0.62) * (target.kind === 'home' ? 0.6 : 1.9);
+        const bobY = Math.cos(life * 0.47) * (target.kind === 'home' ? 0.5 : 1.6);
+        pos.x = smoothTo(pos.x, dest.x + bobX, dt, onLanding ? 0.07 : 0.09);
+        pos.y = smoothTo(pos.y, dest.y + bobY, dt, onLanding ? 0.07 : 0.09);
+        pos.s = smoothTo(pos.s, target.s, dt, 0.22);
       }
 
       const flying = phase === 'flight';
@@ -1083,7 +1097,7 @@ export function LogoFlight({
 
       /* rotation */
       const spinning = Math.abs(spinVel) > 0.18;
-      const lookGain = reduced || flying ? 0.18 : spinning ? 0.12 : 0.92;
+      const lookGain = reduced || flying ? 0 : spinning ? 0.12 : 0.92;
       const nx = (pointer.x - pos.x) / Math.max(160, window.innerWidth * 0.36);
       const ny = (pointer.y - pos.y) / Math.max(110, window.innerHeight * 0.3);
       lookY = smoothTo(lookY, clamp(-nx, -1, 1) * 0.32 * lookGain, dt, 0.15);
@@ -1100,9 +1114,6 @@ export function LogoFlight({
 
       /* atterrissage et accroupissement */
       if (landT < 5) landT += dt;
-      const land = landT < 0.7 ? -0.2 * Math.exp(-landT * 8.5) * Math.cos(landT * 24) : 0;
-      const crouch = phase === 'crouch' ? -0.12 * Math.sin((crouchT / CROUCH) * Math.PI) : 0;
-      const squash = land + crouch;
       const flutter = flying ? Math.sin(flightT * 26) * 1.5 * (1 - clamp(flightT / flightDur)) : 0;
       const breathe = Math.sin(life * 1.5) * (parked ? 0.7 : 0.95);
       const amp = parked ? 0.55 : 1;
@@ -1120,7 +1131,7 @@ export function LogoFlight({
       const scale = (WORLD_H * pos.s) / stageSize;
       model.position.set(0, 0, 0);
       model.rotation.set(0.04 + nod + lookX + idleLeanX, spinY, lean);
-      model.scale.set(scale * (1 - squash * 0.7), scale * (1 + squash), scale);
+      model.scale.set(scale, scale, scale);
       const inner = model.children[0] as Group | undefined;
       if (inner) inner.rotation.set(nod * 0.35 + lookX * 0.45, lookY * 0.28, tilt * 0.55);
 
@@ -1266,7 +1277,6 @@ export function LogoFlight({
       /* faut-il vraiment redessiner ? */
       const busy = Boolean(
         flying ||
-          scrolling ||
           phase === 'crouch' ||
           landT < 0.7 ||
           spinning ||
@@ -1381,7 +1391,6 @@ export function LogoFlight({
       needsRender = 2;
     };
     viewport?.addEventListener('resize', onViewport);
-    viewport?.addEventListener('scroll', onViewport);
     if (onLanding) window.addEventListener('load', onViewport, { once: true });
 
     const onPointer = (e: PointerEvent) => {
@@ -1435,7 +1444,6 @@ export function LogoFlight({
       domWatch.disconnect();
       window.removeEventListener('resize', onResize);
       viewport?.removeEventListener('resize', onViewport);
-      viewport?.removeEventListener('scroll', onViewport);
       if (onLanding) window.removeEventListener('load', onViewport);
       window.removeEventListener('pointermove', onPointer);
       window.removeEventListener('scroll', onScroll);
