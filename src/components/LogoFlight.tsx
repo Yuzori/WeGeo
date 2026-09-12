@@ -651,7 +651,7 @@ export function LogoFlight({
         id: 'home',
         el: logoEl ?? source,
         kind: 'home',
-        x: open && logo ? logo.left + logo.width / 2 - s * 0.34 : bar ? bar.left + 22 : 28,
+        x: open && logo ? logo.left + logo.width / 2 - s * 0.1 : bar ? bar.left + 22 : 28,
         y: open && logo ? logo.top + logo.height / 2 : bar ? bar.top + bar.height / 2 : 24,
         s,
         fixed: true,
