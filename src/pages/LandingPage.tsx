@@ -151,16 +151,16 @@ const RADAR_RINGS = [
 
 const LANDING_PHOTOS_ENABLED = true;
 
-const LANDING_PHOTOS: Record<string, { webp: string; img: string }> = {
-  maps: { webp: '/maps.webp', img: '/maps.jpg' },
-  pipeline: { webp: '/pipeline.webp', img: '/pipeline.jpg' },
-  calls: { webp: '/calls.webp', img: '/calls.jpg' },
-  export: { webp: '/export.webp', img: '/export.jpg' },
-  'trust-1': { webp: '/trust-1.webp', img: '/trust-1.jpg' },
-  'trust-2': { webp: '/trust-2.webp', img: '/trust-2.jpg' },
-  'trust-3': { webp: '/trust-3.webp', img: '/trust-3.jpg' },
-  'trust-4': { webp: '/trust-4.webp', img: '/trust-4.jpg' },
-  'trust-google': { webp: '/trust-google.webp', img: '/trust-google.jpg' },
+const LANDING_PHOTOS: Record<string, string> = {
+  maps: '/maps.webp',
+  pipeline: '/pipeline.webp',
+  calls: '/calls.webp',
+  export: '/export.webp',
+  'trust-1': '/trust-1.webp',
+  'trust-2': '/trust-2.webp',
+  'trust-3': '/trust-3.webp',
+  'trust-4': '/trust-4.webp',
+  'trust-google': '/trust-google.webp',
 };
 
 function PhotoSlot({
@@ -173,36 +173,52 @@ function PhotoSlot({
   delay?: string;
 }) {
   const current = LANDING_PHOTOS[name];
-  const [ready, setReady] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [shown, setShown] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    setReady(false);
+    setLoaded(false);
+    setShown(false);
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) setLoaded(true);
+  }, [name]);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setShown(true);
+      },
+      { threshold: 0.18, rootMargin: '0px 0px -8% 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
   }, [name]);
 
   if (!LANDING_PHOTOS_ENABLED || !current) return null;
 
   return (
     <div
-      ref={ref}
+      ref={wrapRef}
       className={className}
       style={{ '--photo-d': delay } as CSSProperties}
       aria-hidden
     >
-      <picture>
-        <source srcSet={current.webp} type="image/webp" />
-        <img
-          src={current.img}
-          alt=""
-          width={960}
-          height={640}
-          sizes="(max-width: 768px) 100vw, 720px"
-          loading="lazy"
-          decoding="async"
-          className={ready ? 'is-ready' : undefined}
-          onLoad={() => setReady(true)}
-        />
-      </picture>
+      <img
+        ref={imgRef}
+        src={current}
+        alt=""
+        width={960}
+        height={640}
+        sizes="(max-width: 768px) 100vw, 720px"
+        loading="eager"
+        decoding="async"
+        className={loaded && shown ? 'is-ready' : undefined}
+        onLoad={() => setLoaded(true)}
+      />
     </div>
   );
 }
@@ -251,26 +267,215 @@ const TRAIT_ICONS = {
   spark: Sparkles,
 } as const;
 
-function HeroTopoLines() {
+function GoogleMark({ className }: { className?: string }) {
   return (
-    <svg className="lp-hero-topo" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden>
-      <path d="M-20 310 C140 170, 310 260, 470 190 S740 70, 910 210 S1080 360, 1240 250" />
-      <path d="M40 430 C180 320, 280 490, 430 410 S680 250, 830 430 S1020 560, 1200 420" />
-      <path d="M-40 540 C90 470, 230 610, 390 530 S620 390, 790 560 S1010 680, 1220 540" />
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 12h-9" />
     </svg>
   );
 }
 
-function HeroMapDecor() {
+const TOPO_SWEEP_MS = 10_000;
+const TOPO_NEON = { core: 0.07, tip: 0.024, streak: 0.11 } as const;
+const TOPO_LINES = [
+  'M-240 250 C40 110, 260 230, 460 150 S800 60, 1060 190 S1300 320, 1460 210',
+  'M-220 390 C80 270, 300 450, 500 330 S760 250, 1000 390 S1240 510, 1440 370',
+  'M-260 520 C20 400, 240 560, 440 440 S720 360, 980 500 S1220 600, 1430 480',
+  'M-200 610 C100 500, 320 660, 540 540 S820 460, 1080 580 S1280 680, 1450 560',
+] as const;
+const TOPO_DURATIONS = [2800, 3200, 2600, 3000];
+const TOPO_PHASES = [0, 0.24, 0.51, 0.77];
+
+function buildTopoTravel(path: SVGPathElement) {
+  const length = path.getTotalLength();
+  const steps = 280;
+  const pts: { g: number; x: number; y: number }[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const point = path.getPointAtLength((i / steps) * length);
+    pts.push({ g: i / steps, x: point.x, y: point.y });
+  }
+
+  const smoothWin = Math.max(6, Math.round(steps * 0.06));
+  const smoothY = pts.map((_, i) => {
+    let sum = 0;
+    let count = 0;
+    for (let j = i - smoothWin; j <= i + smoothWin; j++) {
+      sum += pts[Math.max(0, Math.min(steps, j))].y;
+      count += 1;
+    }
+    return sum / count;
+  });
+
+  const knots: { g: number; t: number; pace: number }[] = [];
+  let time = 0;
+  const push = (g: number, dt: number, pace: number) => {
+    time += dt;
+    knots.push({ g, t: time, pace });
+  };
+
+  push(0, 0, 1);
+
+  for (let i = 1; i <= steps; i++) {
+    const dx = pts[i].x - pts[i - 1].x;
+    const dy = pts[i].y - pts[i - 1].y;
+    const ds = Math.hypot(dx, dy) || 1e-6;
+    const grade = Math.max(-1, Math.min(1, ((smoothY[i] - smoothY[i - 1]) / ds) * 11));
+    const pace = 1.55 - 0.62 * grade;
+    push(pts[i].g, ds * pace, pace);
+  }
+
+  return { knots, total: time, length };
+}
+
+function topoPaceAt(table: { knots: { g: number; t: number; pace: number }[] }, g: number) {
+  const wrapped = ((g % 1) + 1) % 1;
+  const { knots } = table;
+  let i = 1;
+  while (i < knots.length - 1 && knots[i].g < wrapped) i += 1;
+  const a = knots[i - 1];
+  const b = knots[i];
+  const span = b.g - a.g || 1e-6;
+  const blend = (wrapped - a.g) / span;
+  return a.pace + (b.pace - a.pace) * blend;
+}
+
+function sampleTopoTravel(table: { knots: { g: number; t: number; pace: number }[]; total: number }, u: number) {
+  const target = u * table.total;
+  const { knots } = table;
+  let lo = 0;
+  let hi = knots.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (knots[mid].t < target) lo = mid + 1;
+    else hi = mid;
+  }
+  if (lo <= 0) return knots[0].g;
+  const a = knots[lo - 1];
+  const b = knots[lo];
+  const span = b.t - a.t || 1;
+  return a.g + (b.g - a.g) * ((target - a.t) / span);
+}
+
+function topoSweepDeg(now: number) {
+  return ((now / TOPO_SWEEP_MS) * 360) % 360;
+}
+
+function topoAngleDiff(a: number, b: number) {
+  return Math.abs(((a - b + 540) % 360) - 180);
+}
+
+function HeroTopoLines() {
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const radarPlane = document.querySelector('.lp-hero-stage .lp-radar-plane');
+    type Track = {
+      pack: SVGGElement;
+      path: SVGPathElement;
+      table: ReturnType<typeof buildTopoTravel>;
+      duration: number;
+      phase: number;
+      boostUntil: number;
+      lastHit: number;
+    };
+
+    const tracks: Track[] = [];
+    [...svg.querySelectorAll<SVGGElement>('.lp-hero-topo-run')].forEach((group, lineIndex) => {
+      const path = group.querySelector<SVGPathElement>('.lp-hero-topo-base');
+      const pack = group.querySelector<SVGGElement>('.lp-hero-topo-neon-pack');
+      if (!(path instanceof SVGPathElement) || !pack) return;
+      if (path.getTotalLength() <= 0) return;
+      tracks.push({
+        pack,
+        path,
+        table: buildTopoTravel(path),
+        duration: TOPO_DURATIONS[lineIndex] ?? 2800,
+        phase: TOPO_PHASES[lineIndex] ?? 0,
+        boostUntil: 0,
+        lastHit: 0,
+      });
+    });
+    if (!tracks.length) return;
+
+    let raf = 0;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const sweep = topoSweepDeg(now);
+      const radarRect = radarPlane?.getBoundingClientRect();
+      const rcx = radarRect ? radarRect.left + radarRect.width / 2 : 0;
+      const rcy = radarRect ? radarRect.top + radarRect.height / 2 : 0;
+      const ctm = svg.getScreenCTM();
+
+      for (const track of tracks) {
+        const u = ((now / track.duration) + track.phase) % 1;
+        const along = sampleTopoTravel(track.table, u);
+        const headLen = track.table.length * along;
+        const pt = track.path.getPointAtLength(headLen);
+
+        let boost = 1;
+        if (ctm && radarRect) {
+          const head = new DOMPoint(pt.x, pt.y).matrixTransform(ctm);
+          const bearing = (Math.atan2(head.y - rcy, head.x - rcx) * 180) / Math.PI;
+          const diff = topoAngleDiff(bearing, sweep);
+          if (diff < 16 && now - track.lastHit > 180) {
+            track.lastHit = now;
+            track.boostUntil = now + 1000;
+          }
+          if (now < track.boostUntil) {
+            boost = 1 + 0.72 * ((track.boostUntil - now) / 1000);
+          }
+        }
+
+        const pace = topoPaceAt(track.table, along);
+        const stretch = 1 + Math.min(0.42, Math.max(0, (0.98 - pace) * 0.38));
+        const blur = Math.min(2.8, Math.max(0, (0.98 - pace) * 2.4));
+
+        track.pack.style.setProperty('--lp-neon-boost', boost.toFixed(3));
+        track.pack.style.setProperty('--lp-neon-blur', `${blur.toFixed(2)}px`);
+
+        for (const neon of track.pack.querySelectorAll<SVGPathElement>('.lp-hero-topo-neon')) {
+          const base = Number(neon.dataset.len) || TOPO_NEON.core;
+          const len = base * stretch;
+          const gap = Math.max(0.04, 1 - len);
+          neon.style.strokeDasharray = `${len.toFixed(4)} ${gap.toFixed(4)}`;
+          neon.style.strokeDashoffset = String(-along + len);
+          if (neon.classList.contains('lp-hero-topo-neon-streak')) {
+            neon.style.opacity = String(0.1 + Math.min(0.32, Math.max(0, 0.98 - pace) * 0.28));
+          }
+        }
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
-    <div className="lp-hero-map" aria-hidden>
-      <svg viewBox="0 0 960 280" preserveAspectRatio="xMidYMax slice">
-        <path className="lp-hero-map-road" d="M-20 250 C70 238, 110 190, 168 205 S250 248, 318 214 S410 168, 498 206 S590 252, 672 198 S780 132, 890 176 S940 214, 980 198" />
-        <path className="lp-hero-map-road" d="M214 280 C208 232, 246 176, 198 138 S176 74, 228 28" />
-        <path className="lp-hero-map-road" d="M586 280 C562 224, 618 178, 574 128 S612 64, 668 22" />
-        <path className="lp-hero-map-road is-soft" d="M0 188 C90 172, 150 214, 236 178 S360 142, 448 186 S560 228, 650 164 S760 108, 960 148" />
-      </svg>
-    </div>
+    <svg ref={svgRef} className="lp-hero-topo" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden>
+      {TOPO_LINES.map((d, index) => (
+        <g key={d} className={`lp-hero-topo-run lp-hero-topo-run-${index}`}>
+          <path className="lp-hero-topo-base" d={d} />
+          <g className="lp-hero-topo-neon-pack">
+            <path className="lp-hero-topo-neon lp-hero-topo-neon-streak" d={d} pathLength={1} data-len={TOPO_NEON.streak} />
+            <path className="lp-hero-topo-neon lp-hero-topo-neon-core" d={d} pathLength={1} data-len={TOPO_NEON.core} />
+            <path className="lp-hero-topo-neon lp-hero-topo-neon-tip" d={d} pathLength={1} data-len={TOPO_NEON.tip} />
+          </g>
+        </g>
+      ))}
+    </svg>
   );
 }
 
@@ -789,7 +994,6 @@ export function LandingPage() {
           <div className="lp-hero-stage">
             <HeroTopoLines />
             <RadarField />
-            <HeroMapDecor />
             <div className="lp-hero-copy">
               <p className="lp-chip lp-chip-hero">
                 <TrendingUp className="lp-chip-hero-icon" aria-hidden />
@@ -952,7 +1156,7 @@ export function LandingPage() {
                     {...(index === 0 ? { 'data-mascot': 'trust' } : {})}
                   >
                     <PhotoSlot name={`trust-${index + 1}`} className="lp-trust-photo" delay={`${0.14 + index * 0.07}s`} />
-                    <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_16%,transparent)] text-[color:var(--lp-accent-text)]">
+                    <span className="lp-trust-icon inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_16%,transparent)] text-[color:var(--lp-accent-text)]">
                       <Icon className="size-4" />
                     </span>
                     <div>
@@ -963,13 +1167,18 @@ export function LandingPage() {
                 );
               })}
             </ul>
-            <aside className="lp-trust-card lp-trust-wide lp-reveal mt-5 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6" style={{ '--d': '0.38s' } as CSSProperties}>
+            <aside className="lp-trust-card lp-trust-wide lp-reveal mt-5 flex gap-4 rounded-2xl border border-[var(--lp-line)] bg-[var(--lp-bg)] p-5 sm:p-6" style={{ '--d': '0.38s' } as CSSProperties}>
               <PhotoSlot name="trust-google" className="lp-trust-photo" delay="0.42s" />
-              <h3 className="text-lg">{m.trust.googleTitle}</h3>
-              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{m.trust.googleText}</p>
-              <Link to="/confidentialite" className="mt-3 inline-block text-sm font-medium text-lime-deep">
-                {m.trust.googlePrivacy}
-              </Link>
+              <span className="lp-trust-icon inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--lp-lime)_16%,transparent)] text-[color:var(--lp-accent-text)]">
+                <GoogleMark className="lp-trust-google-mark size-[1.05rem]" />
+              </span>
+              <div>
+                <h3 className="text-lg">{m.trust.googleTitle}</h3>
+                <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted">{m.trust.googleText}</p>
+                <Link to="/confidentialite" className="mt-3 inline-block text-sm font-medium text-lime-deep">
+                  {m.trust.googlePrivacy}
+                </Link>
+              </div>
             </aside>
           </div>
         </section>
@@ -1012,6 +1221,7 @@ export function LandingPage() {
                 >
                   <PhotoSlot name={`plan-${plan.id}`} className="lp-plan-photo-full" delay={`${0.2 + shownPlans.indexOf(plan) * 0.1}s`} />
                   <div className="lp-plan-overlay">
+                    {plan.highlighted && <p className="lp-plan-hot-badge">{m.pricing.hotBadge}</p>}
                     <h3 className="text-2xl">{plan.name}</h3>
                     <p className="mt-1 text-sm text-muted">{plan.tagline}</p>
                     <p

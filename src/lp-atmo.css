@@ -578,21 +578,16 @@
   background: transparent !important;
 }
 
-.lp-trust-photo picture,
-.lp-feature-photo picture,
-.lp-section-photo picture,
-.lp-plan-photo-full picture {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
 .lp-trust-photo img,
 .lp-feature-photo img,
 .lp-section-photo img,
 .lp-plan-photo-full img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   opacity: 0;
-  transition: opacity 0.22s ease-out;
+  transition: opacity 1.15s ease;
 }
 
 .lp-trust-photo img.is-ready,
@@ -620,7 +615,7 @@
 .lp-section-photo::after,
 .lp-plan-photo-full::after {
   opacity: 0;
-  transition: opacity 0.25s ease-out;
+  transition: opacity 1.15s ease;
 }
 
 .lp-trust-photo:has(img.is-ready)::after,

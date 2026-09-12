@@ -1283,14 +1283,52 @@ html.prospy-site::after {
   width: 108%;
   height: 112%;
   pointer-events: none;
-  opacity: 0.16;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 62%, transparent 84%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 62%, transparent 84%);
 }
 
-.lp-hero-topo path {
+.lp-hero-topo path.lp-hero-topo-base {
   fill: none;
   stroke: color-mix(in oklab, var(--lp-lime) 32%, transparent);
   stroke-width: 0.9;
   vector-effect: non-scaling-stroke;
+  opacity: 0.16;
+}
+
+.lp-hero-topo-neon-pack {
+  --lp-neon-boost: 1;
+  --lp-neon-blur: 0px;
+  filter: brightness(var(--lp-neon-boost));
+}
+
+.lp-hero-topo path.lp-hero-topo-neon {
+  fill: none;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.lp-hero-topo path.lp-hero-topo-neon-streak {
+  stroke: var(--lp-lime);
+  stroke-width: 2.2;
+  stroke-dasharray: 0.11 0.89;
+  opacity: 0.18;
+  filter: blur(var(--lp-neon-blur, 0px)) drop-shadow(0 0 6px color-mix(in oklab, var(--lp-lime) 60%, transparent));
+}
+
+.lp-hero-topo path.lp-hero-topo-neon-core {
+  stroke: color-mix(in oklab, var(--lp-lime) 82%, white);
+  stroke-width: 1.55;
+  stroke-dasharray: 0.07 0.93;
+  opacity: 0.92;
+  filter: drop-shadow(0 0 5px var(--lp-lime));
+}
+
+.lp-hero-topo path.lp-hero-topo-neon-tip {
+  stroke: color-mix(in oklab, var(--lp-lime) 68%, white);
+  stroke-width: 1.35;
+  stroke-dasharray: 0.024 0.976;
+  opacity: 1;
+  filter: drop-shadow(0 0 5px var(--lp-lime)) drop-shadow(0 0 10px color-mix(in oklab, var(--lp-lime) 75%, transparent));
 }
 
 .lp-hero-map {
@@ -1474,14 +1512,15 @@ html.prospy-site::after {
  * suit la mascotte en transform. Le GPU ombre vingt-cinq fois moins de pixels.
  */
 .lp-logo-canvas {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   z-index: 45;
   width: 176px;
   height: 176px;
   pointer-events: none;
-  contain: strict;
+  contain: layout style;
+  overflow: visible;
 }
 
 .lp-logo-canvas.is-front,
@@ -1490,6 +1529,7 @@ html.prospy-site::after {
 }
 
 .lp-logo-canvas.is-nav {
+  position: fixed;
   z-index: 54;
 }
 
@@ -1506,8 +1546,163 @@ html.prospy-site::after {
   backface-visibility: hidden;
 }
 
+.lp-logo-canvas.is-warp-out::before,
+.lp-logo-canvas.is-warp-in::before,
+.lp-logo-canvas.is-warp-out::after,
+.lp-logo-canvas.is-warp-in::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.lp-logo-canvas.is-warp-out::after,
+.lp-logo-canvas.is-warp-in::after {
+  width: var(--lp-warp-ring, 32px);
+  height: var(--lp-warp-ring, 32px);
+  border: 1.75px solid color-mix(in oklab, var(--lp-lime, #b7e133) 82%, white);
+  box-shadow: 0 0 calc(12px * var(--lp-warp-scale, 1)) color-mix(in oklab, var(--lp-lime, #b7e133) 55%, transparent);
+}
+
+.lp-logo-canvas.is-warp-out::before,
+.lp-logo-canvas.is-warp-in::before {
+  width: var(--lp-warp-glow, 24px);
+  height: var(--lp-warp-glow, 24px);
+  background: color-mix(in oklab, var(--lp-lime, #b7e133) 42%, transparent);
+  filter: blur(calc(6px * var(--lp-warp-scale, 1)));
+  opacity: 0;
+}
+
+.lp-logo-canvas.is-warp-out::after {
+  animation: lp-warp-out 0.26s ease-in forwards;
+}
+
+.lp-logo-canvas.is-warp-in::after {
+  animation: lp-warp-in 0.38s ease-out forwards;
+}
+
+.lp-logo-canvas.is-warp-fx.is-warp-out::before {
+  animation: lp-warp-out-glow 0.26s ease-in forwards;
+}
+
+.lp-logo-canvas.is-warp-fx.is-warp-in::before {
+  animation: lp-warp-in-glow 0.38s ease-out forwards;
+}
+
+.lp-logo-canvas.is-warp-fx.is-warp-in::after {
+  animation: lp-warp-in-burst 0.38s ease-out forwards;
+}
+
+.lp-logo-canvas.is-warp-fx.is-warp-out::after {
+  animation: lp-warp-out-burst 0.26s ease-in forwards;
+}
+
+.lp-logo-canvas.is-warp-spawn.is-warp-in::before {
+  animation: lp-warp-spawn-glow 0.42s ease-out forwards;
+}
+
+.lp-logo-canvas.is-warp-spawn.is-warp-in::after {
+  width: calc(var(--lp-warp-ring, 32px) * 1.12);
+  height: calc(var(--lp-warp-ring, 32px) * 1.12);
+  border-width: 2px;
+  box-shadow:
+    0 0 calc(14px * var(--lp-warp-scale, 1)) color-mix(in oklab, var(--lp-lime, #b7e133) 62%, transparent),
+    0 0 calc(28px * var(--lp-warp-scale, 1)) color-mix(in oklab, var(--lp-lime, #b7e133) 34%, transparent);
+  animation: lp-warp-spawn 0.42s ease-out forwards;
+}
+
+@keyframes lp-warp-out {
+  from {
+    transform: translate(-50%, -50%) scale(calc(1 * var(--lp-warp-scale, 1)));
+    opacity: 0.72;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(0.22 * var(--lp-warp-scale, 1)));
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-out-burst {
+  from {
+    transform: translate(-50%, -50%) scale(calc(1 * var(--lp-warp-scale, 1))) rotate(0deg);
+    opacity: 0.78;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(0.18 * var(--lp-warp-scale, 1))) rotate(-36deg);
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-out-glow {
+  from {
+    transform: translate(-50%, -50%) scale(calc(1.05 * var(--lp-warp-scale, 1)));
+    opacity: 0.52;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(0.35 * var(--lp-warp-scale, 1)));
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-in {
+  from {
+    transform: translate(-50%, -50%) scale(calc(0.24 * var(--lp-warp-scale, 1)));
+    opacity: 0.86;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(1.78 * var(--lp-warp-scale, 1)));
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-in-burst {
+  from {
+    transform: translate(-50%, -50%) scale(calc(0.2 * var(--lp-warp-scale, 1))) rotate(-32deg);
+    opacity: 0.88;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(1.86 * var(--lp-warp-scale, 1))) rotate(22deg);
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-in-glow {
+  from {
+    transform: translate(-50%, -50%) scale(calc(0.38 * var(--lp-warp-scale, 1)));
+    opacity: 0.64;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(1.92 * var(--lp-warp-scale, 1)));
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-spawn {
+  from {
+    transform: translate(-50%, -50%) scale(calc(0.16 * var(--lp-warp-scale, 1))) rotate(0deg);
+    opacity: 0.94;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(2.08 * var(--lp-warp-scale, 1))) rotate(130deg);
+    opacity: 0;
+  }
+}
+
+@keyframes lp-warp-spawn-glow {
+  from {
+    transform: translate(-50%, -50%) scale(calc(0.4 * var(--lp-warp-scale, 1)));
+    opacity: 0.82;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(calc(2.28 * var(--lp-warp-scale, 1)));
+    opacity: 0;
+  }
+}
+
 .lp-mascot-hit {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   z-index: 46;
@@ -1520,7 +1715,6 @@ html.prospy-site::after {
   cursor: pointer;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  will-change: transform;
 }
 
 @media (max-width: 767px) {
@@ -1532,9 +1726,22 @@ html.prospy-site::after {
   .lp-mascot-say {
     max-width: min(16.5rem, calc(100vw - max(1rem, env(safe-area-inset-left)) - max(1rem, env(safe-area-inset-right))));
   }
+
+  .lp-hero-topo {
+    inset: -4% -2%;
+    width: 104%;
+    height: 108%;
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 58%, transparent 88%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 58%, transparent 88%);
+  }
+
+  .lp-hero-topo path.lp-hero-topo-neon-core {
+    opacity: 0.96;
+  }
 }
 
 .lp-mascot-hit.is-nav {
+  position: fixed;
   z-index: 56;
 }
 
@@ -1886,10 +2093,34 @@ html.is-boot .lp-hero-mocks {
 }
 
 .lp-plan-card.is-hot {
-  background: color-mix(in oklab, var(--lp-lime) 9%, var(--lp-surface));
+  z-index: 3;
+  background: color-mix(in oklab, var(--lp-lime) 14%, var(--lp-surface));
   box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--lp-lime) 18%, transparent),
-    0 24px 56px -32px color-mix(in oklab, var(--lp-lime) 24%, transparent);
+    0 0 0 1px color-mix(in oklab, var(--lp-lime) 42%, transparent),
+    0 28px 64px -28px color-mix(in oklab, var(--lp-lime) 38%, transparent);
+}
+
+.lp-plan-hot-badge {
+  position: absolute;
+  top: 0.85rem;
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.28rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--lp-lime) 55%, transparent);
+  background: color-mix(in oklab, var(--lp-lime) 22%, var(--lp-surface));
+  color: var(--lp-accent-text);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lp-plan-card.is-hot .lp-plan-overlay {
+  padding-top: 2.65rem;
 }
 
 .lp-card-photo {
@@ -2138,6 +2369,7 @@ html.is-boot .lp-hero-mocks {
   justify-content: center;
   width: 2.35rem;
   height: 2.35rem;
+  margin-right: 0.42rem;
   flex-shrink: 0;
   overflow: visible;
   transition:
@@ -3415,6 +3647,15 @@ html.is-lang-out .lp-lang-flip-item.is-on {
   z-index: 1;
 }
 
+.lp-trust-icon {
+  border: 1px solid color-mix(in oklab, var(--lp-lime) 38%, transparent);
+}
+
+.lp-trust-google-mark {
+  opacity: 0.78;
+  overflow: visible;
+}
+
 .lp-feature > *:not(.lp-feature-photo) {
   position: relative;
 }
@@ -4045,7 +4286,16 @@ html.is-lang-out .lp-lang-flip-item.is-on {
 
 @media (min-width: 900px) {
   .lp-plans {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: visible;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.18fr) minmax(0, 0.9fr);
+    align-items: stretch;
+    padding-top: 1.25rem;
+    padding-inline: 0.35rem;
+  }
+
+  .lp-plans > .lp-plan-card.is-hot,
+  .lp-plans > .lp-plan-card.is-hot.is-in {
+    transform: translateY(-1.15rem) scale(1.045);
   }
 }
 
@@ -4141,6 +4391,10 @@ html.is-lang-out .lp-lang-flip-item.is-on {
   .lp-plans > .lp-plan-card {
     max-width: 26rem;
     margin-inline: auto;
+  }
+
+  .lp-plans > .lp-plan-card.is-hot {
+    order: -1;
   }
 
   .lp-command {
@@ -4675,6 +4929,11 @@ html.is-lang-out .lp-lang-flip-item.is-on {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .lp-hero-topo path.lp-hero-topo-neon {
+    animation: none !important;
+    opacity: 0;
   }
 
   .geo-blip-core,

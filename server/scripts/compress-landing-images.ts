@@ -1,5 +1,5 @@
 /**
- * Compresse les visuels de la landing en WebP + JPEG optimisé.
+ * Compresse les visuels de la landing en WebP.
  * Usage : npm run images:landing
  */
 import { readdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
@@ -9,7 +9,6 @@ import sharp from 'sharp';
 const ROOT = join(import.meta.dirname, '..', '..', 'public');
 const MAX_WIDTH = 960;
 const WEBP_QUALITY = 72;
-const JPEG_QUALITY = 74;
 
 const LANDING_NAMES = new Set([
   'maps',
@@ -44,7 +43,7 @@ function collectSources(): string[] {
     }
     for (const entry of entries) {
       const ext = extname(entry).toLowerCase();
-      if (!['.jpg', '.jpeg', '.png'].includes(ext)) continue;
+      if (!['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) continue;
       const name = basename(entry, ext);
       if (!LANDING_NAMES.has(name)) continue;
       files.push(join(dir, entry));
@@ -58,35 +57,28 @@ async function optimize(file: string): Promise<void> {
   const ext = extname(file).toLowerCase();
   const base = file.slice(0, -ext.length);
   const webpOut = `${base}.webp`;
+  const tempOut = ext === '.webp' ? `${file}.opt.tmp` : webpOut;
 
   const input = sharp(file, { failOn: 'none' }).rotate();
   const meta = await input.metadata();
   const pipeline = meta.width && meta.width > MAX_WIDTH ? input.resize({ width: MAX_WIDTH, withoutEnlargement: true }) : input;
 
-  await pipeline.clone().webp({ quality: WEBP_QUALITY, effort: 6, smartSubsample: true }).toFile(webpOut);
+  await pipeline.webp({ quality: WEBP_QUALITY, effort: 6, smartSubsample: true }).toFile(tempOut);
 
-  const tempOut = `${file}.opt.tmp`;
-  if (ext === '.png') {
-    await pipeline
-      .clone()
-      .png({ quality: JPEG_QUALITY, compressionLevel: 9, palette: meta.hasAlpha })
-      .toFile(tempOut);
-  } else {
-    await pipeline.clone().jpeg({ quality: JPEG_QUALITY, mozjpeg: true, progressive: true }).toFile(tempOut);
-  }
-  try {
+  if (ext === '.webp') {
     unlinkSync(file);
-  } catch {
-    /* ignore */
+    renameSync(tempOut, file);
+  } else {
+    try {
+      unlinkSync(file);
+    } catch {
+      /* ignore */
+    }
   }
-  renameSync(tempOut, file);
 
-  const afterJpg = statSync(file).size;
   const afterWebp = statSync(webpOut).size;
   const rel = file.replace(`${ROOT}\\`, '').replace(`${ROOT}/`, '');
-  console.log(
-    `${rel}\n  JPEG/PNG ${formatBytes(before)} → ${formatBytes(afterJpg)} · WebP ${formatBytes(afterWebp)}`,
-  );
+  console.log(`${rel}\n  ${formatBytes(before)} → WebP ${formatBytes(afterWebp)}`);
 }
 
 const files = collectSources();
@@ -99,4 +91,4 @@ console.log(`Optimisation de ${files.length} visuel(s) landing…\n`);
 for (const file of files) {
   await optimize(file);
 }
-console.log('\nTerminé. Les navigateurs modernes chargeront le WebP via <picture>.');
+console.log('\nTerminé. Les visuels landing sont en WebP.');

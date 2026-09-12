@@ -8,7 +8,7 @@ const KEY = 'prospy.lang';
 
 const copy = {
   fr: {
-    title: 'Prospy. La prospection à son paroxysme',
+    title: 'Prospy. Le meilleur outil de prospection au monde',
     nav: {
       product: 'Produit',
       features: 'Fonctionnalités',
@@ -26,10 +26,10 @@ const copy = {
       chip: '+3 480 prospects trouvés en une seule journée',
       h1a: 'La prospection',
       h1b: 'à son paroxysme',
-      lead: 'Prospy ouvre les fiches Google Maps à votre place. Ceux sans site restent, avec téléphone, adresse et dirigeant pour enchaîner les appels.',
+      lead: 'Le meilleur outil de prospection au monde. Prospy ouvre les fiches Google Maps à votre place. Ceux sans site restent, prêts à appeler.',
       cta: 'Créer un compte',
       see: 'Voir comment',
-      leadShort: 'Un relevé Maps, seulement les commerces sans site. Ensuite vous appelez depuis le pipeline.',
+      leadShort: 'Le relevé Maps le plus net. Seulement les commerces sans site, puis vous appelez.',
       traits: [
         { k: 'zap', title: 'Rapide' },
         { k: 'shield', title: 'Fiable' },
@@ -57,7 +57,7 @@ const copy = {
     product: {
       chip: 'tri automatique',
       h2: 'On écarte ceux qui ont déjà un site.',
-      lead: 'Prospy ouvre chaque fiche Maps et cherche s’il y a un vrai site. Un site vitrine, on passe. Une page Facebook ou rien du tout, le commerce reste dans votre liste.',
+      lead: 'Le meilleur tri du marché. Prospy ouvre chaque fiche Maps et cherche s’il y a un vrai site. Un site vitrine, on passe. Une page Facebook ou rien du tout, le commerce reste dans votre liste.',
     },
     sieve: {
       label: 'tri du web · live',
@@ -118,13 +118,13 @@ const copy = {
     launch: {
       chip: 'premier relevé',
       h2: 'Ville et métiers.',
-      lead: 'Prospy parcourt Maps, filtre les sites existants et vous rend une liste d’appels classée.',
+      lead: 'Le relevé le plus rapide. Prospy parcourt Maps, filtre les sites existants et vous rend une liste d’appels classée.',
       run: 'Lancer',
     },
     trust: {
       chip: 'sécurité',
       h2: 'En place.',
-      lead: 'Pas de badge marketing inventé. Pour une mise en production large, un audit reste de mise.',
+      lead: 'Un outil taillé pour rester devant. Pas de badge marketing inventé. Pour une mise en production large, un audit reste de mise.',
       items: [
         {
           title: 'Secrets serveur',
@@ -148,19 +148,20 @@ const copy = {
         'La connexion Google ouvre votre compte Prospy (mail et nom). L’accès Sheets sert uniquement quand vous exportez un relevé. Prospy ne lit pas vos fichiers, n’envoie pas de mail à votre place et ne revend rien.',
       googlePrivacy: 'Politique de confidentialité',
     },
-      pricing: {
+    pricing: {
       chip: 'tarifs',
       h2: 'Les tarifs.',
-      lead: 'Chaque offre lève des plafonds. Volume de relevé, réglages, équipe, nom du dirigeant.',
+      lead: 'Le meilleur outil de prospection au monde, à trois offres. Volume de relevé, réglages, équipe, nom du dirigeant.',
       month: 'par mois',
       year: 'par an',
       monthly: 'Mensuel',
       yearly: 'Annuel',
       yearlyHint: '2 mois offerts',
+      hotBadge: 'Le plus choisi',
     },
     cta: {
       h2: 'Passez aux appels.',
-      lead: 'Créez un compte, lancez un relevé, triez, appelez. Même apparence jour et nuit que dans l’outil.',
+      lead: 'Le meilleur outil de prospection au monde. Créez un compte, lancez un relevé, triez, appelez.',
       create: 'Créer un compte',
       open: 'Ouvrir l’app',
     },
@@ -179,7 +180,7 @@ const copy = {
       source: 'Source',
     },
     footer: {
-      blurb: 'Relevé de commerces locaux sans site. Vos données restent sur votre compte. Paiement via Stripe.',
+      blurb: 'Le meilleur relevé de commerces locaux sans site. Vos données restent sur votre compte. Paiement via Stripe.',
       product: 'produit',
       account: 'compte',
       look: 'apparence',
@@ -189,24 +190,18 @@ const copy = {
       copy: '© 2026 Prospy. Tous droits réservés.',
     },
     mascot: {
-      home: 'Clique ici, je te montre.',
-      hero: 'Pas de site ? Souvent un bon numéro à composer.',
-      steps: 'Tu choisis la zone, je filtre, tu appelles.',
-      product: 'J’ouvre chaque fiche Maps et je jette ceux qui ont déjà un site.',
-      band: 'Regroupe par quartier pour enchaîner les appels.',
-      features: 'Relevé, tri, appels, export. Rien de plus.',
-      launch: 'Une ville, un métier, ta liste est prête.',
-      trust: 'Tes fiches restent chez toi, privées.',
-      pricing: 'À partir de 29 €. Tu changes quand tu veux.',
-      cta: 'Crée un compte, lance un relevé. Deux minutes.',
-      dock: 'Tu as parcouru la page ? On lance ?',
-      click: [
-        'On lance un relevé ?',
-        'Je garde seulement ceux sans site.',
-        'Ta liste d’appels est plus bas.',
-        'Sans site, souvent bon appel.',
-        'Encore un clic, je continue.',
-      ],
+      home: '',
+      hero: 'Ici tu vois comment Prospy repère les commerces sans site web.',
+      steps: 'Trois étapes. Zone, relevé, appels.',
+      product: 'Je parcours Google Maps et je garde les fiches sans site.',
+      band: 'Les résultats se regroupent par quartier pour tes tournées.',
+      features: 'Relevé, tri, appels et export au même endroit.',
+      launch: 'Un compte et ta première liste en quelques minutes.',
+      trust: 'Tes fiches restent sur ton compte, elles ne sont pas partagées.',
+      pricing: 'Les tarifs sont ici. Tu changes de formule quand tu veux.',
+      cta: 'Prêt à lancer ton premier relevé ?',
+      dock: 'Tu as parcouru la page. On crée ton compte ?',
+      click: [],
     },
     guide: {
       skip: 'Passer',
@@ -377,7 +372,7 @@ const copy = {
     },
   },
   en: {
-    title: 'Prospy. Prospecting at its peak',
+    title: 'Prospy. The best prospecting tool in the world',
     nav: {
       product: 'Product',
       features: 'Features',
@@ -395,10 +390,10 @@ const copy = {
       chip: '+3,480 prospects found in a single day',
       h1a: 'Prospecting',
       h1b: 'at its peak',
-      lead: 'Prospy opens Google Maps listings for you. Real websites drop off. You keep the phone number, address and owner to work through your calls.',
+      lead: 'The best prospecting tool in the world. Prospy opens Google Maps listings for you. Real websites drop off. Those without a site stay, ready to call.',
       cta: 'Create account',
       see: 'See how',
-      leadShort: 'A Maps survey, only shops with no website. Then you call from the pipeline.',
+      leadShort: 'The sharpest Maps survey. Only shops with no website, then you call.',
       traits: [
         { k: 'zap', title: 'Fast' },
         { k: 'shield', title: 'Reliable' },
@@ -426,7 +421,7 @@ const copy = {
     product: {
       chip: 'auto triage',
       h2: 'We drop shops that already have a website.',
-      lead: 'Prospy opens each Maps listing and looks for a real website. A live site, we skip it. Facebook only or nothing at all, the shop stays on your list.',
+      lead: 'The sharpest triage on the market. Prospy opens each Maps listing and looks for a real website. A live site, we skip it. Facebook only or nothing at all, the shop stays on your list.',
     },
     sieve: {
       label: 'web triage · live',
@@ -487,13 +482,13 @@ const copy = {
     launch: {
       chip: 'first survey',
       h2: 'City and trades.',
-      lead: 'Prospy walks Maps, filters existing sites and returns a ranked call list.',
+      lead: 'The fastest survey. Prospy walks Maps, filters existing sites and returns a ranked call list.',
       run: 'Run',
     },
     trust: {
       chip: 'security',
       h2: 'In place.',
-      lead: 'No fake marketing badges. For large production, an audit still makes sense.',
+      lead: 'A tool built to stay ahead. No fake marketing badges. For large production, an audit still makes sense.',
       items: [
         {
           title: 'Server secrets',
@@ -520,16 +515,17 @@ const copy = {
     pricing: {
       chip: 'pricing',
       h2: 'Pricing.',
-      lead: 'Each plan caps or unlocks survey volume, settings, team invites, and owner names.',
+      lead: 'The best prospecting tool in the world, in three plans. Survey volume, settings, team, owner names.',
       month: 'per month',
       year: 'per year',
       monthly: 'Monthly',
       yearly: 'Yearly',
       yearlyHint: '2 months free',
+      hotBadge: 'Most chosen',
     },
     cta: {
       h2: 'Start calling.',
-      lead: 'Create an account, run a survey, sort, call. Same day and night look as in the app.',
+      lead: 'The best prospecting tool in the world. Create an account, run a survey, sort, call.',
       create: 'Create an account',
       open: 'Open the app',
     },
@@ -548,7 +544,7 @@ const copy = {
       source: 'Source',
     },
     footer: {
-      blurb: 'Survey of local shops with no website. Your data stays on your account. Paid via Stripe.',
+      blurb: 'The best survey of local shops with no website. Your data stays on your account. Paid via Stripe.',
       product: 'product',
       account: 'account',
       look: 'appearance',
@@ -558,24 +554,18 @@ const copy = {
       copy: '© 2026 Prospy. All rights reserved.',
     },
     mascot: {
-      home: 'Click here, I’ll show you.',
-      hero: 'No website? Often a good number to dial.',
-      steps: 'Pick an area, I filter, you call.',
-      product: 'I open each Maps listing and drop anyone with a real site.',
-      band: 'Group by neighbourhood to chain your calls.',
-      features: 'Survey, triage, calls, export. That’s it.',
-      launch: 'One city, one trade, your list is ready.',
-      trust: 'Your cards stay on your account, private.',
-      pricing: 'From 29 €. Switch whenever you want.',
-      cta: 'Create an account, run a survey. Two minutes.',
-      dock: 'Seen the page? Ready to run one?',
-      click: [
-        'Run a survey?',
-        'I only keep shops with no website.',
-        'Your call list is further down.',
-        'No site often means a good call.',
-        'One more click, I keep going.',
-      ],
+      home: '',
+      hero: 'This is how Prospy finds local businesses with no website.',
+      steps: 'Three steps. Area, survey, calls.',
+      product: 'I scan Google Maps and keep listings with no site.',
+      band: 'Results group by neighbourhood for your call rounds.',
+      features: 'Survey, triage, calls and export in one place.',
+      launch: 'An account and your first list in a few minutes.',
+      trust: 'Your leads stay on your account. They are not shared.',
+      pricing: 'Plans are here. Switch whenever you want.',
+      cta: 'Ready to run your first survey?',
+      dock: 'You have seen the page. Ready to sign up?',
+      click: [],
     },
     guide: {
       skip: 'Skip',

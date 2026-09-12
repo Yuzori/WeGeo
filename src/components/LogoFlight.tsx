@@ -33,12 +33,11 @@ import { useI18n } from '../i18n';
  * Deux règles tiennent tout le fichier :
  *
  * 1. Aucune lecture de mise en page pendant l'animation. Les branches sont
- *    mesurées à l'arrêt (resize, mutation, fin de scroll). La boucle de rendu
- *    ne fait que du calcul.
+ *    mesurées à l'arrêt (resize, mutation, fin de scroll).
  *
- * 2. Pendant un défilement la mascotte reste figée à l'écran. Elle ne poursuit
- *    pas la page, ne change pas de branche et ne suit pas le pointeur. Dès que
- *    la page est immobile, elle reprend (regard, vol vers la branche visible).
+ * 2. La mascotte se téléporte d'une zone à l'autre dès que le nouveau point
+ *    est joignable, même pendant le scroll. Sur un point, elle y reste collée
+ *    sans glisser.
  */
 
 const GLTF_CANDIDATES = ['/model-optimized.glb', '/model.glb', '/model.gltf'];
@@ -80,20 +79,50 @@ function renderDpr(onLanding: boolean): number {
   return Math.min(mobile ? 1.75 : 2, Math.max(1, dpr));
 }
 
-function scrollSettleMs(): number {
+function scrollSettleMs(onLanding: boolean): number {
+  if (onLanding) return isMobileViewport() ? 480 : 420;
   return isMobileViewport() ? 180 : 140;
+}
+
+/** Groupe les perchoirs d'une même section. La téléportation ne joue qu'entre zones. */
+function perchZone(p: { kind: string }): string {
+  switch (p.kind) {
+    case 'home':
+    case 'logo':
+      return 'home';
+    case 'hero':
+    case 'window':
+      return 'hero';
+    case 'step':
+    case 'steps':
+      return 'steps';
+    case 'feature':
+      return 'features';
+    case 'plan':
+      return 'pricing';
+    default:
+      return p.kind;
+  }
 }
 
 /** Hauteur de visée dans le viewport pour choisir une branche. */
 const AIM = 0.36;
 /** Temps minimum passé sur une branche avant d'en changer. */
 const DWELL = 520;
-/** Accroupissement avant le décollage. */
-const CROUCH = 90;
 /** Au-delà, la mascotte quitte la barre même si le scroll continue. */
 const HOME_LEAVE = 72;
 /** En dessous, et seulement là, elle a le droit de rentrer au logo. */
 const HOME_RETURN = 40;
+const WARP_OUT = 0.26;
+const WARP_IN = 0.38;
+const WARP_IN_SPAWN = 0.42;
+/** Taille de référence pour calibrer l'anneau de téléportation. */
+const WARP_SIZE_REF = 58;
+/** Orientation repos : la boucle du logo s’ouvre vers la droite. */
+const REST_YAW = Math.PI + 0.22;
+/** Rotation permanente (rad/s). La mascotte ne se fige jamais au repos. */
+const AMBIENT_SPIN = 0.34;
+const AMBIENT_SPIN_FLYING = 0.62;
 
 type MascotSource = 'gltf' | 'fbx' | 'fallback';
 type ModelReady = { object: Object3D; source: MascotSource };
@@ -245,7 +274,7 @@ function extractMascotMeshes(root: Object3D): Group {
     node.matrixWorld.decompose(pos, quat, scl);
     mesh.position.copy(pos);
     mesh.quaternion.copy(quat);
-    mesh.scale.copy(scl);
+    mesh.scale.set(1, 1, 1);
     mesh.name = node.name || key;
     group.add(mesh);
   });
@@ -264,15 +293,8 @@ function refit(wrap: Group) {
   box.getCenter(center);
   box.getSize(size);
   inner.position.sub(center);
-  const width = Math.max(size.x, 1e-4);
-  const height = Math.max(size.y, 1e-4);
-  inner.scale.set(height / width, 1, 1);
-  inner.updateMatrixWorld(true);
-  box.setFromObject(inner);
-  box.getSize(size);
-  box.getCenter(center);
-  inner.position.sub(center);
-  inner.scale.multiplyScalar(1 / Math.max(size.y, 1e-4));
+  const k = 1 / Math.max(size.y, 1e-4);
+  inner.scale.set(k, k * 0.86, k);
   inner.updateMatrixWorld(true);
   box.setFromObject(inner);
   box.getCenter(center);
@@ -629,7 +651,7 @@ export function LogoFlight({
         id: 'home',
         el: logoEl ?? source,
         kind: 'home',
-        x: open && logo ? logo.left + logo.width / 2 : bar ? bar.left + 22 : 28,
+        x: open && logo ? logo.left + logo.width / 2 - s * 0.34 : bar ? bar.left + 22 : 28,
         y: open && logo ? logo.top + logo.height / 2 : bar ? bar.top + bar.height / 2 : 24,
         s,
         fixed: true,
@@ -658,22 +680,20 @@ export function LogoFlight({
 
     const pos = { x: 0, y: 0, s: 36 };
     let target: Perch = home;
-    let phase: 'perched' | 'crouch' | 'flight' = 'perched';
-    let flightT = 0;
-    let flightDur = 0;
-    let flightArc = 0;
-    let flightStart = { x: 0, y: 0 };
-    let crouchT = 0;
     let landT = 99;
     let switchedAt = 0;
     let pickDue = true;
     let scrollAt = 0;
     let lastScrollY = window.scrollY;
     let scrollSpeed = 0;
-    let scrollLock = false;
-    const freezePos = { x: 0, y: 0 };
+    let pending: Perch | null = null;
+    let warp: 'idle' | 'out' | 'away' | 'in' = 'idle';
+    let warpT = 0;
+    let spawnSpin = true;
+    let spawnFx = false;
+    let spawnDebut = false;
 
-    let spinY = 0.22;
+    let spinY = REST_YAW;
     let spinVel = 0;
     let lookX = 0;
     let lookY = 0;
@@ -792,26 +812,34 @@ export function LogoFlight({
     });
 
     const takeOff = (to: Perch) => {
-      const a = { x: pos.x, y: pos.y };
-      const b = resolve(to);
-      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const b = to.fixed ? resolve(to) : { x: to.x, y: to.y };
+      const debut = spawnSpin;
+      spawnSpin = false;
       target = to;
       switchedAt = performance.now();
-      if (dist < 12 || reduced) {
-        phase = 'perched';
-        landT = 0;
-      } else {
-        phase = 'crouch';
-        crouchT = 0;
-        flightT = 0;
-        flightDur = clamp(420 + dist * 0.58, 420, 1100) / 1000;
-        flightArc = Math.min(64, dist * 0.16) + to.s * 0.12;
-        if (!reduced) spinVel += (b.x >= a.x ? 1 : -1) * clamp(dist / 240, 0.5, 2.6);
-      }
+      pos.x = b.x;
+      pos.y = b.y;
+      pos.s = to.s;
+      warp = 'in';
+      warpT = 0;
+      landT = 0;
+      spawnDebut = debut;
+      spawnFx = !debut;
+      if (!reduced) spinVel += debut ? 28 : 11;
       if (to.kind === 'home') {
         hushSay();
         spokenFor = to.id;
       }
+      needsRender = 3;
+    };
+
+    const vanish = () => {
+      if (warp === 'out' || warp === 'away') return;
+      warp = 'out';
+      warpT = 0;
+      spawnFx = true;
+      if (!reduced) spinVel += 8;
+      hushSay();
       needsRender = 3;
     };
 
@@ -927,7 +955,13 @@ export function LogoFlight({
         if (!clearsNav(current, sy)) return best;
         const curY = screenY(current, sy);
         const stillHere = curY > -vh * 0.06 && curY < vh * 0.88;
+        const zoneChanged = perchZone(current) !== perchZone(best);
         if (stillHere) {
+          if (zoneChanged) {
+            const curScore = Math.abs(curY - aim);
+            if (curScore <= bestScore + vh * 0.08) return current;
+            return best;
+          }
           const dwell = scrollSpeed > 120 ? DWELL * 0.45 : onLanding ? DWELL * 0.62 : DWELL;
           if (now - switchedAt < dwell) return current;
           const curScore = Math.abs(curY - aim);
@@ -951,104 +985,81 @@ export function LogoFlight({
       const dy = sy - lastScrollY;
       lastScrollY = sy;
       if (Math.abs(dy) > 0.5) {
-        if (!scrollLock) {
-          scrollLock = true;
-          freezePos.x = pos.x;
-          freezePos.y = pos.y;
-          if (phase !== 'perched') {
-            phase = 'perched';
-            landT = 99;
-          }
-          needsRender = 1;
-        }
         scrollAt = now;
         scrollSpeed = Math.abs(dy) / Math.max(dt, 0.008);
-      } else if (scrollLock && now - scrollAt > scrollSettleMs()) {
-        scrollLock = false;
-        scrollSpeed = 0;
-        pickDue = true;
-        needsRender = 2;
-      } else if (!scrollLock && now - scrollAt > scrollSettleMs()) {
+      } else if (now - scrollAt > scrollSettleMs(onLanding)) {
         scrollSpeed = 0;
       }
-      const scrolling = scrollLock;
-      const settled = !scrolling;
+      const settled = now - scrollAt > scrollSettleMs(onLanding);
 
-      // Remesure à l'arrêt seulement. Pendant le geste on ne touche ni aux
-      // branches ni à la position : la mascotte reste collée à l'écran.
-      if (settled && pickDue) {
-        for (const [el, perch] of registry) {
-          const fresh = measurePerch(el, perch.s);
-          if (fresh) registry.set(el, { ...fresh, id: perch.id });
+      if (warp === 'out') {
+        warpT += dt;
+        if (warpT >= WARP_OUT) {
+          warp = 'away';
+          warpT = 0;
         }
-        measureHome();
+      }
+
+      if (pickDue || warp === 'away' || !settled) {
+        if (warp === 'away' || settled) {
+          for (const [el, perch] of registry) {
+            const fresh = measurePerch(el, perch.s);
+            if (fresh) registry.set(el, { ...fresh, id: perch.id });
+          }
+          measureHome();
+        }
       }
 
       const guided = Boolean(guideTargetRef.current);
-      const onPage = target.kind !== 'home';
-      const vhNow = window.innerHeight;
-      const tracked = target.el ? (registry.get(target.el) ?? target) : target;
-      const offScreen =
-        !guided &&
-        settled &&
-        phase === 'perched' &&
-        tracked.kind !== 'home' &&
-        tracked.kind !== 'dock' &&
-        (!clearsNav(tracked, sy) ||
-          screenY(tracked, sy) < -vhNow * 0.1 ||
-          screenY(tracked, sy) > vhNow * 0.92);
+      const nextPick = warp === 'in' ? null : choose(now, sy);
 
-      if (scrolling) {
-        pos.x = freezePos.x;
-        pos.y = freezePos.y;
-        needsRender = 0;
-        return;
-      } else if (!guided && phase === 'perched' && !onPage && sy > HOME_LEAVE) {
-        const next = choose(now, sy);
-        if (next.kind !== 'home') takeOff(next);
-      } else if (offScreen) {
-        const next = choose(now, sy);
-        if (next.id !== target.id) takeOff(next);
-      } else if (guided || (phase === 'perched' && pickDue)) {
-        const next = choose(now, sy);
-        if (next.id !== target.id) takeOff(next);
-        else target = next;
-        if (!guided) pickDue = false;
+      if (warp === 'out' || warp === 'away') {
+        if (nextPick) pending = nextPick;
+      }
+
+      if (warp === 'away') {
+        const next = pending ?? nextPick ?? target;
+        pending = null;
+        takeOff(next);
+      } else if (warp === 'idle' && nextPick) {
+        const zoneChanged = perchZone(nextPick) !== perchZone(target);
+        const perchY = screenY(target, sy);
+        const currentGone =
+          target.kind !== 'home' &&
+          (perchY < -window.innerHeight * 0.08 || perchY > window.innerHeight * 0.92);
+        if (nextPick.id !== target.id && (guided || zoneChanged || currentGone)) {
+          pending = nextPick;
+          vanish();
+        } else if (nextPick.id === target.id) {
+          target = nextPick;
+          if (!guided) pickDue = false;
+        }
       }
       if (target.kind === 'home') target = home;
 
-      /* position */
-      const dest = resolve(target);
-      if (phase === 'crouch') {
-        crouchT += dt * 1000;
-        if (crouchT >= CROUCH) {
-          phase = 'flight';
-          flightT = 0;
-          // Départ = là où la mascotte est visuellement, pas le perchoir d'origine
-          // en coordonnées page (sinon saccade navbar → héros au début du vol).
-          flightStart = { x: pos.x, y: pos.y };
+      if (warp === 'in') {
+        warpT += dt;
+        const warpInDur = spawnDebut ? WARP_IN_SPAWN : WARP_IN;
+        if (warpT >= warpInDur) {
+          warp = 'idle';
+          warpT = 0;
+          spawnFx = false;
+          spawnDebut = false;
+          pickDue = false;
         }
-      } else if (phase === 'flight') {
-        flightT += dt;
-        const t = clamp(flightT / flightDur);
-        const e = easeInOutCubic(t);
-        pos.x = flightStart.x + (dest.x - flightStart.x) * e;
-        pos.y = flightStart.y + (dest.y - flightStart.y) * e - flightArc * Math.sin(Math.PI * e);
-        pos.s = smoothTo(pos.s, target.s, dt, 0.2);
-        if (t >= 1) {
-          phase = 'perched';
-          landT = 0;
-          pickDue = true;
-        }
-      } else if (phase === 'perched') {
-        const bobX = Math.sin(life * 0.62) * (target.kind === 'home' ? 0.6 : 1.9);
-        const bobY = Math.cos(life * 0.47) * (target.kind === 'home' ? 0.5 : 1.6);
-        pos.x = smoothTo(pos.x, dest.x + bobX, dt, onLanding ? 0.07 : 0.09);
-        pos.y = smoothTo(pos.y, dest.y + bobY, dt, onLanding ? 0.07 : 0.09);
-        pos.s = smoothTo(pos.s, target.s, dt, 0.22);
       }
 
-      const flying = phase === 'flight';
+      /* Collée au document sur la page, fixe seulement dans la barre. */
+      const pinned = target.fixed;
+      const dest = pinned ? resolve(target) : { x: target.x, y: target.y };
+      pos.x = dest.x;
+      pos.y = dest.y;
+      pos.s = target.s;
+      const pin = pinned ? 'fixed' : 'absolute';
+      if (host.style.position !== pin) host.style.position = pin;
+      if (hit.style.position !== pin) hit.style.position = pin;
+
+      const flying = warp !== 'idle';
       const parked = target.kind === 'home' || target.kind === 'dock';
 
       /* parole */
@@ -1073,11 +1084,11 @@ export function LogoFlight({
       }
 
       /* impatience : micro-gestes aléatoires, sans rebond */
-      if (!onLanding && !reduced && !flying) {
+      if (!reduced && !flying) {
         fidget += dt;
         if (fidget > fidgetIn) {
           fidget = 0;
-          fidgetIn = 4.2 + Math.random() * 6.8;
+          fidgetIn = onLanding ? 5.4 + Math.random() * 4.2 : 4.2 + Math.random() * 6.8;
           const roll = Math.random();
           if (roll < 0.28) {
             idleKind = 1;
@@ -1095,43 +1106,81 @@ export function LogoFlight({
         if (idleKind === 2 || idleKind === 3) idleT += dt;
       }
 
-      /* rotation */
-      const spinning = Math.abs(spinVel) > 0.18;
-      const lookGain = reduced || flying ? 0 : spinning ? 0.12 : 0.92;
-      const nx = (pointer.x - pos.x) / Math.max(160, window.innerWidth * 0.36);
-      const ny = (pointer.y - pos.y) / Math.max(110, window.innerHeight * 0.3);
-      lookY = smoothTo(lookY, clamp(-nx, -1, 1) * 0.32 * lookGain, dt, 0.15);
-      lookX = smoothTo(lookX, clamp(ny, -1, 1) * 0.18 * lookGain, dt, 0.17);
-      const face = 0.22 + lookY;
-      const travelDir = flying ? (dest.x >= pos.x ? 1 : -1) : 0;
-      spinY += spinVel * dt + travelDir * 0.9 * dt;
-      const tauF = flying ? 0.36 : 0.72 + Math.min(0.4, Math.abs(spinVel) * 0.045);
-      spinVel *= Math.exp(-dt / tauF);
-      if (Math.abs(spinVel) < 0.12 && !flying) {
-        spinVel = 0;
-        spinY = smoothAngle(spinY, face, dt, 0.45);
+      /* rotation — jamais figée : spin d'ambiance + impulsions */
+      const spinning = !reduced || Math.abs(spinVel) > 0.18;
+      const viewX = pinned ? pos.x : pos.x - window.scrollX;
+      const viewY = pinned ? pos.y : pos.y - window.scrollY;
+      const lookGain = reduced || flying ? 0 : spinning ? 0.08 : 0.35;
+      const nx = (pointer.x - viewX) / Math.max(160, window.innerWidth * 0.36);
+      const ny = (pointer.y - viewY) / Math.max(110, window.innerHeight * 0.3);
+      lookY = smoothTo(lookY, clamp(-nx, -1, 1) * 0.18 * lookGain, dt, 0.15);
+      lookX = smoothTo(lookX, clamp(ny, -1, 1) * 0.12 * lookGain, dt, 0.17);
+      const face = REST_YAW + lookY;
+      if (!reduced) {
+        spinY += (flying ? AMBIENT_SPIN_FLYING : AMBIENT_SPIN) * dt;
+        spinY += spinVel * dt;
+        const tauF = flying ? 0.36 : 0.72 + Math.min(0.4, Math.abs(spinVel) * 0.045);
+        spinVel *= Math.exp(-dt / tauF);
+        spinY += angleDelta(spinY, face) * (1 - Math.exp(-dt / 3.2)) * 0.035;
+      } else {
+        spinY += spinVel * dt;
+        const tauF = flying ? 0.36 : 0.72 + Math.min(0.4, Math.abs(spinVel) * 0.045);
+        spinVel *= Math.exp(-dt / tauF);
+        if (Math.abs(spinVel) < 0.12 && !flying) {
+          spinVel = 0;
+          spinY = smoothAngle(spinY, face, dt, 0.28);
+        }
       }
 
       /* atterrissage et accroupissement */
       if (landT < 5) landT += dt;
-      const flutter = flying ? Math.sin(flightT * 26) * 1.5 * (1 - clamp(flightT / flightDur)) : 0;
-      const breathe = Math.sin(life * 1.5) * (parked ? 0.7 : 0.95);
+      const flutter = 0;
+      const breathe = flying ? 0 : Math.sin(life * 1.5) * (parked ? 0.7 : 0.95);
       const amp = parked ? 0.55 : 1;
       const nod = Math.sin(life * 1.15) * 0.03 * amp;
       const tilt = Math.sin(life * 0.85 + 0.8) * 0.028 * amp;
-      const idleLeanX = idleKind === 2 ? Math.sin(idleT * 2.1) * 0.055 : 0;
-      const idleLeanZ = idleKind === 2 ? Math.cos(idleT * 1.65) * 0.038 : 0;
-      const idleDrift = idleKind === 3 ? Math.sin(idleT * 1.35) * 1.8 : 0;
-      const lean = flying ? 0.13 * travelDir : tilt + lookY * 0.12 + idleLeanZ;
+      const idleLeanX = flying ? 0 : idleKind === 2 ? Math.sin(idleT * 2.1) * 0.055 : 0;
+      const idleLeanZ = flying ? 0 : idleKind === 2 ? Math.cos(idleT * 1.65) * 0.038 : 0;
+      const idleDrift = flying ? 0 : idleKind === 3 ? Math.sin(idleT * 1.35) * 1.8 : 0;
+      const lean = flying ? 0 : tilt + lookY * 0.12 + idleLeanZ;
 
       const drawX = pos.x + idleDrift * 0.35;
       const drawY = pos.y + breathe + flutter + idleDrift * 0.22;
+      const viewDrawX = pinned ? drawX : drawX - window.scrollX;
+      const viewDrawY = pinned ? drawY : drawY - window.scrollY;
 
       /* rendu : le canvas suit la mascotte, il ne couvre pas l'écran */
+      let vis = 1;
+      let pop = 1;
+      const warpInDur = spawnDebut ? WARP_IN_SPAWN : WARP_IN;
+      if (warp === 'out') {
+        const t = easeInOutCubic(clamp(warpT / WARP_OUT));
+        vis = 1 - t;
+        pop = 1 - t * 0.44;
+      } else if (warp === 'away') {
+        vis = 0;
+        pop = 0.48;
+      } else if (warp === 'in') {
+        const t = easeInOutCubic(clamp(warpT / warpInDur));
+        vis = t;
+        pop = spawnDebut ? 0.42 + t * 0.58 : 0.56 + t * 0.44;
+      }
+      if (flying && !reduced) spinVel = Math.max(spinVel, spawnDebut ? 4.8 : 3.8);
+      const warpScale = clamp(pos.s / WARP_SIZE_REF, 0.58, 1.38).toFixed(3);
+      const ringMul = spawnDebut && warp === 'in' ? 1.14 : 1;
+      const warpRing = Math.round(clamp(pos.s * 0.54 * ringMul, 22, 48));
+      const warpGlow = Math.round(warpRing * 0.76);
+      if (host.style.getPropertyValue('--lp-warp-scale') !== warpScale) {
+        host.style.setProperty('--lp-warp-scale', warpScale);
+      }
+      if (host.style.getPropertyValue('--lp-warp-ring') !== `${warpRing}px`) {
+        host.style.setProperty('--lp-warp-ring', `${warpRing}px`);
+        host.style.setProperty('--lp-warp-glow', `${warpGlow}px`);
+      }
       const scale = (WORLD_H * pos.s) / stageSize;
       model.position.set(0, 0, 0);
       model.rotation.set(0.04 + nod + lookX + idleLeanX, spinY, lean);
-      model.scale.set(scale, scale, scale);
+      model.scale.set(scale * pop, scale * pop, scale * pop);
       const inner = model.children[0] as Group | undefined;
       if (inner) inner.rotation.set(nod * 0.35 + lookX * 0.45, lookY * 0.28, tilt * 0.55);
 
@@ -1162,8 +1211,8 @@ export function LogoFlight({
               : pos.s * 0.85 + 34;
         stirField(
           field,
-          drawX + window.scrollX,
-          drawY + window.scrollY,
+          pinned ? drawX + window.scrollX : drawX,
+          pinned ? drawY + window.scrollY : drawY,
           stirRadius,
           dt,
           brisk,
@@ -1174,8 +1223,8 @@ export function LogoFlight({
 
       const menuOpen = Boolean(navWrap?.classList.contains('is-open'));
       const root = document.documentElement;
-      root.style.setProperty('--lp-mx', clamp(drawX / window.innerWidth, 0, 1).toFixed(4));
-      root.style.setProperty('--lp-my', clamp(drawY / window.innerHeight, 0, 1).toFixed(4));
+      root.style.setProperty('--lp-mx', clamp(viewDrawX / window.innerWidth, 0, 1).toFixed(4));
+      root.style.setProperty('--lp-my', clamp(viewDrawY / window.innerHeight, 0, 1).toFixed(4));
       root.style.setProperty('--lp-mascot-active', flying || menuOpen ? '0' : '1');
 
       /* couches et logos, écritures uniquement sur changement */
@@ -1190,17 +1239,29 @@ export function LogoFlight({
         hit.classList.toggle('is-nav', layer === 'nav');
         hit.classList.toggle('is-guide', guiding);
       }
-      const hidden = menuOpen && !guiding ? '0' : '1';
-      if (host.style.opacity !== hidden) {
-        host.style.opacity = hidden;
-        hit.style.pointerEvents = hidden === '0' ? 'none' : 'auto';
+      const hidden = menuOpen && !guiding ? 0 : vis;
+      const opacity = hidden.toFixed(3);
+      if (host.style.opacity !== opacity) host.style.opacity = opacity;
+      hit.style.pointerEvents = hidden < 0.25 ? 'none' : 'auto';
+      const warpClass = `${warp === 'out' ? 'out' : warp === 'in' ? 'in' : warp === 'away' ? 'away' : ''}${spawnDebut ? '-spawn' : spawnFx ? '-fx' : ''}`;
+      if (host.dataset.warp !== warpClass) {
+        host.dataset.warp = warpClass;
+        host.classList.toggle('is-warp-out', warp === 'out');
+        host.classList.toggle('is-warp-in', warp === 'in');
+        host.classList.toggle('is-warp-spawn', spawnDebut && warp === 'in');
+        host.classList.toggle('is-warp-fx', spawnFx && (warp === 'in' || warp === 'out'));
+        host.classList.toggle('is-away', warp === 'away');
+      }
+      if (warp === 'idle') {
+        spawnFx = false;
+        spawnDebut = false;
       }
       const atHome = target.id === 'home';
-      const homeState = `${atHome ? 1 : 0}${spinning || flying ? 1 : 0}${guiding || !menuOpen ? 1 : 0}`;
+      const homeState = `${atHome ? 1 : 0}${spinning || flying ? 1 : 0}${guiding || !menuOpen ? 1 : 0}${vis > 0.45 ? 1 : 0}`;
       if (host.dataset.homeState !== homeState) {
         host.dataset.homeState = homeState;
         for (const el of logoSlots) {
-          const on = atHome && el === logoEl && (guiding || !menuOpen);
+          const on = atHome && el === logoEl && (guiding || !menuOpen) && vis > 0.45;
           el.classList.toggle('is-3d', on);
           el.classList.toggle('is-spinning', on && (spinning || flying));
         }
@@ -1215,36 +1276,49 @@ export function LogoFlight({
         }
       }
 
-      /* bulle : à côté, jamais sur le corps. Masquée pendant le vol. */
+      /* bulle : même repère que la mascotte (fixe nav, absolu page). Collée au scroll. */
       if (flying) sayInited = false;
       const fading = say.classList.contains('is-out');
       const talking = (!menuOpen || guiding) && !flying && (Boolean(sayText) || fading || guiding);
       if (say.classList.contains('is-on') !== talking) say.classList.toggle('is-on', talking);
       if (talking) {
+        if (say.style.position !== pin) {
+          say.style.position = pin;
+          sayInited = false;
+          lastSayLeft = -1;
+          lastSayTop = -1;
+        }
         const pad = 12;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
+        const sx = window.scrollX;
+        const sy = window.scrollY;
         const body = Math.max(28, pos.s * 0.55);
         const gap = Math.max(18, pos.s * 0.24);
-        const leftSlot = drawX - body - gap - sayW;
-        const rightSlot = drawX + body + gap;
+        const leftSlot = viewDrawX - body - gap - sayW;
+        const rightSlot = viewDrawX + body + gap;
         const canLeft = leftSlot >= pad;
         const canRight = rightSlot + sayW <= vw - pad;
         const fromRight = canLeft || !canRight;
         let targetLeft = fromRight ? leftSlot : rightSlot;
-        let targetTop = drawY - sayH * 0.5;
+        let targetTop = viewDrawY - sayH * 0.5;
         if (!canLeft && !canRight) {
-          targetLeft = clamp(drawX - sayW * 0.5, pad, Math.max(pad, vw - sayW - pad));
-          targetTop = drawY - body - gap - sayH;
-          if (targetTop < pad) targetTop = drawY + body + gap;
+          targetLeft = clamp(viewDrawX - sayW * 0.5, pad, Math.max(pad, vw - sayW - pad));
+          targetTop = viewDrawY - body - gap - sayH;
+          if (targetTop < pad) targetTop = viewDrawY + body + gap;
         } else {
           targetLeft = clamp(targetLeft, pad, Math.max(pad, vw - sayW - pad));
         }
-        const hitX = targetLeft < drawX + body && targetLeft + sayW > drawX - body;
-        const hitY = targetTop < drawY + body && targetTop + sayH > drawY - body;
-        if (hitX && hitY) targetTop = drawY - body - gap - sayH;
+        const hitX = targetLeft < viewDrawX + body && targetLeft + sayW > viewDrawX - body;
+        const hitY = targetTop < viewDrawY + body && targetTop + sayH > viewDrawY - body;
+        if (hitX && hitY) targetTop = viewDrawY - body - gap - sayH;
         targetTop = clamp(targetTop, pad, Math.max(pad, vh - sayH - pad));
-        if (!sayInited) {
+        if (!pinned) {
+          targetLeft += sx;
+          targetTop += sy;
+        }
+        const scrolling = !settled || scrollSpeed > 8;
+        if (!sayInited || scrolling) {
           sayX = targetLeft;
           sayY = targetTop;
           sayInited = true;
@@ -1277,7 +1351,7 @@ export function LogoFlight({
       /* faut-il vraiment redessiner ? */
       const busy = Boolean(
         flying ||
-          phase === 'crouch' ||
+          !settled ||
           landT < 0.7 ||
           spinning ||
           Math.abs(pos.x - dest.x) > 0.3 ||
@@ -1285,7 +1359,7 @@ export function LogoFlight({
           field?.live.size,
       );
       idleFrames = busy ? 0 : idleFrames + 1;
-      if (busy) needsRender = 2;
+      if (busy || !reduced) needsRender = 2;
       else needsRender = Math.max(needsRender, 1);
     };
 
@@ -1330,37 +1404,48 @@ export function LogoFlight({
     // relançait des remesures en boucle et faisait saccader la mascotte.
     if (!onLanding) domWatch.observe(document.body, { childList: true, subtree: true });
 
+    host.style.opacity = '0';
+
     /* --- montage ---------------------------------------------------------- */
 
+    let attachedSource: MascotSource | null = null;
+    let booted = false;
+
     const mount = (object: Object3D, modelSource: MascotSource) => {
-      if (dead || model) return;
+      if (dead) return;
+      if (attachedSource === modelSource && model) return;
+      if (attachedSource && attachedSource !== 'fallback' && modelSource === 'fallback') return;
       const wrap = buildMascot(object, modelSource);
       const inner = wrap.children[0] as Group | undefined;
       const logo = inner?.children[0] as Group | undefined;
       if (modelSource !== 'fallback' && (!logo || logo.children.length < 1)) {
-        mount(fallbackPin(), 'fallback');
+        if (!model) mount(fallbackPin(), 'fallback');
         return;
       }
+      if (model) scene.remove(model);
       model = wrap;
+      attachedSource = modelSource;
       scene.add(wrap);
-      syncRegistry();
-      measureHome();
-      target = home;
-      const start = resolve(home);
-      pos.x = start.x;
-      pos.y = start.y;
-      pos.s = home.s;
-      source.classList.add('is-3d');
-      source.classList.remove('is-3d-wait');
-      lastT = performance.now();
-      tick(lastT);
-      window.clearTimeout(introTimer);
-      introTimer = window.setTimeout(() => {
-        if (dead || target.id !== 'home' || sayText || guideTargetRef.current) return;
-        spokenFor = target.id;
-        speak(linesRef.current.home, true);
-      }, 1100);
+      lightsForTheme();
+      if (!booted) {
+        booted = true;
+        syncRegistry();
+        measureHome();
+        target = home;
+        const start = resolve(home);
+        pos.x = start.x;
+        pos.y = start.y;
+        pos.s = home.s;
+        source.classList.remove('is-3d-wait');
+        lastT = performance.now();
+        takeOff(home);
+        tick(lastT);
+        window.clearTimeout(introTimer);
+      }
+      needsRender = 3;
     };
+
+    if (modelShared) mount(modelShared.object, modelShared.source);
 
     onModelReady(({ object, source: modelSource }) => {
       if (dead) return;
