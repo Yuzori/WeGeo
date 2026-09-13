@@ -876,7 +876,6 @@ export function LandingPage() {
 
   return (
     <div className="landing">
-      <LogoFlight sourceRef={logoRef} onProgress={onLogoProgress} />
       <div className="lp-head-atmo" aria-hidden>
         <div className="lp-aura lp-aura-head" />
       </div>
@@ -987,6 +986,7 @@ export function LandingPage() {
           </div>
         </div>
       </div>
+      <LogoFlight sourceRef={logoRef} onProgress={onLogoProgress} />
 
       <div className="lp-frame lp-frame-head">
         <section className="lp-glow lp-atmo">

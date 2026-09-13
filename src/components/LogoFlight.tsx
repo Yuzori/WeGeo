@@ -172,8 +172,6 @@ function onModelReady(cb: (ready: ModelReady) => void) {
   else modelWaiters.push(cb);
 }
 
-startModelLoad();
-
 function clamp(v: number, a = 0, b = 1): number {
   return Math.min(b, Math.max(a, v));
 }
@@ -203,10 +201,22 @@ function brandLime(dark: boolean): number {
   return dark ? LIME_NIGHT : LIME_DAY;
 }
 
+function isMeshNode(node: Object3D): node is Mesh {
+  return (node as Mesh).isMesh === true;
+}
+
+function meshCount(root: Object3D): number {
+  let count = 0;
+  root.traverse((node) => {
+    if (isMeshNode(node)) count += 1;
+  });
+  return count;
+}
+
 function paintBrand(root: Object3D, dark: boolean) {
   const hex = brandLime(dark);
   root.traverse((node) => {
-    if (!(node instanceof Mesh)) return;
+    if (!isMeshNode(node)) return;
     node.castShadow = false;
     node.receiveShadow = false;
     node.frustumCulled = true;
@@ -261,10 +271,10 @@ function extractMascotMeshes(root: Object3D): Group {
   const seen = new Set<string>();
   let namedCurves = false;
   root.traverse((node) => {
-    if (node instanceof Mesh && /curve002|curve003/i.test(node.name)) namedCurves = true;
+    if (isMeshNode(node) && /curve002|curve003/i.test(node.name)) namedCurves = true;
   });
   root.traverse((node) => {
-    if (!(node instanceof Mesh)) return;
+    if (!isMeshNode(node)) return;
     if (namedCurves && !/curve002|curve003/i.test(node.name)) return;
     const key = node.name ? node.name.replace(/\.\d+$/, '').toLowerCase() : node.uuid;
     if (seen.has(key)) return;
@@ -555,7 +565,9 @@ export function LogoFlight({
     const hit = hitRef.current;
     const say = sayRef.current;
     const sayLine = say?.querySelector<HTMLElement>('.lp-mascot-say-text');
-    const source = sourceRef.current;
+    const source =
+      sourceRef.current ??
+      document.querySelector<HTMLAnchorElement>('.lp-nav-logo, .app-logo-slot');
     if (!host || !hit || !say || !sayLine || !source) return;
 
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1411,38 +1423,45 @@ export function LogoFlight({
     let attachedSource: MascotSource | null = null;
     let booted = false;
 
+    const boot = () => {
+      if (booted) return;
+      booted = true;
+      syncRegistry();
+      measureHome();
+      target = home;
+      const start = resolve(home);
+      pos.x = start.x;
+      pos.y = start.y;
+      pos.s = home.s;
+      source.classList.remove('is-3d-wait');
+      lastT = performance.now();
+      takeOff(home);
+      tick(lastT);
+      window.clearTimeout(introTimer);
+    };
+
     const mount = (object: Object3D, modelSource: MascotSource) => {
       if (dead) return;
       if (attachedSource === modelSource && model) return;
       if (attachedSource && attachedSource !== 'fallback' && modelSource === 'fallback') return;
-      const wrap = buildMascot(object, modelSource);
-      const inner = wrap.children[0] as Group | undefined;
-      const logo = inner?.children[0] as Group | undefined;
-      if (modelSource !== 'fallback' && (!logo || logo.children.length < 1)) {
+      try {
+        const root =
+          modelSource === 'gltf' || modelSource === 'fbx' ? (object.clone(true) as Object3D) : object;
+        const wrap = buildMascot(root, modelSource);
+        if (modelSource !== 'fallback' && meshCount(wrap) < 1) {
+          if (!model) mount(fallbackPin(), 'fallback');
+          return;
+        }
+        if (model) scene.remove(model);
+        model = wrap;
+        attachedSource = modelSource;
+        scene.add(wrap);
+        lightsForTheme();
+        boot();
+        needsRender = 3;
+      } catch {
         if (!model) mount(fallbackPin(), 'fallback');
-        return;
       }
-      if (model) scene.remove(model);
-      model = wrap;
-      attachedSource = modelSource;
-      scene.add(wrap);
-      lightsForTheme();
-      if (!booted) {
-        booted = true;
-        syncRegistry();
-        measureHome();
-        target = home;
-        const start = resolve(home);
-        pos.x = start.x;
-        pos.y = start.y;
-        pos.s = home.s;
-        source.classList.remove('is-3d-wait');
-        lastT = performance.now();
-        takeOff(home);
-        tick(lastT);
-        window.clearTimeout(introTimer);
-      }
-      needsRender = 3;
     };
 
     if (modelShared) mount(modelShared.object, modelShared.source);
@@ -1451,6 +1470,8 @@ export function LogoFlight({
       if (dead) return;
       mount(object, modelSource);
     });
+
+    if (!booted) mount(fallbackPin(), 'fallback');
 
     /* --- écouteurs -------------------------------------------------------- */
 

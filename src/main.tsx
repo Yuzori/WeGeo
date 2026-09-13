@@ -11,14 +11,16 @@ import './lp-atmo.css';
 applyStoredTheme();
 document.documentElement.classList.add('prospy-site');
 
+const app = (
+  <BrowserRouter>
+    <LocaleProvider>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </LocaleProvider>
+  </BrowserRouter>
+);
+
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <BrowserRouter>
-      <LocaleProvider>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
-      </LocaleProvider>
-    </BrowserRouter>
-  </StrictMode>,
+  import.meta.env.DEV ? <StrictMode>{app}</StrictMode> : app,
 );
